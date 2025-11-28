@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORSEC LENS - Aplikasi Penomoran Naskah Dinas | Bank Sulselbar</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Login Page -->
+    <div class="login-page" id="loginPage">
+        <div class="login-container">
+            <div class="login-left">
+                <div class="login-branding">
+                    <img src="logo-bank-sulselbar.png" alt="Bank Sulselbar" class="login-logo">
+                    <h1>CORSEC LENS</h1>
+                    <p class="tagline">Aplikasi Penomoran Naskah Dinas</p>
+                    <p class="division">Divisi Corporate Secretary</p>
+                </div>
+                <div class="login-features">
+                    <div class="feature-item">
+                        <i class="fas fa-file-signature"></i>
+                        <span>Penomoran Otomatis</span>
+                    </div>
+                    <div class="feature-item">
+                        <i class="fas fa-folder-open"></i>
+                        <span>Manajemen Dokumen</span>
+                    </div>
+                    <div class="feature-item">
+                        <i class="fas fa-chart-line"></i>
+                        <span>Dashboard Statistik</span>
+                    </div>
+                    <div class="feature-item">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Keamanan Terjamin</span>
+                    </div>
+                </div>
+            </div>
+            <div class="login-right">
+                <div class="login-form-container">
+                    <h2>Selamat Datang</h2>
+                    <p>Silakan masuk ke akun Anda</p>
+                    <form id="loginForm" onsubmit="handleLogin(event)">
+                        <div class="form-group">
+                            <label for="username">
+                                <i class="fas fa-user"></i>
+                                Username / NIP
+                            </label>
+                            <input type="text" id="username" placeholder="Masukkan username atau NIP" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="password">
+                                <i class="fas fa-lock"></i>
+                                Password
+                            </label>
+                            <div class="password-input">
+                                <input type="password" id="password" placeholder="Masukkan password" required>
+                                <button type="button" class="toggle-password" onclick="togglePassword()">
+                                    <i class="fas fa-eye" id="eyeIcon"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-options">
+                            <label class="remember-me">
+                                <input type="checkbox" id="rememberMe">
+                                <span>Ingat saya</span>
+                            </label>
+                            <a href="#" class="forgot-password">Lupa password?</a>
+                        </div>
+                        <button type="submit" class="btn-login">
+                            <i class="fas fa-sign-in-alt"></i>
+                            Masuk
+                        </button>
+                    </form>
+                    <div class="login-info">
+                        <p>Demo Account:</p>
+                        <code>Username: safirah | Password: corsec2025</code>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="login-footer">
+            <p>&copy; 2025 PT Bank Pembangunan Daerah Sulawesi Selatan dan Sulawesi Barat</p>
+            <p>Divisi Corporate Secretary - CORSEC LENS v1.0.0</p>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div class="app-container" id="appContainer" style="display: none;">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <img src="logo-bank-sulselbar.png" alt="Bank Sulselbar" class="sidebar-logo">
+                <div class="app-name">
+                    <h2>CORSEC LENS</h2>
+                    <span>Penomoran Naskah Dinas</span>
+                </div>
+            </div>
+
+            <div class="user-profile">
+                <div class="user-avatar">
+                    <i class="fas fa-user-circle"></i>
+                </div>
+                <div class="user-info">
+                    <h3 id="userDisplayName">Safirah Wardinah Irianto</h3>
+                    <p id="userRole">Asisten Administrasi</p>
+                    <span class="user-division">Corporate Secretary</span>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <span class="nav-section-title">MENU UTAMA</span>
+                    <a href="#" class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
+                        <i class="fas fa-th-large"></i>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="#" class="nav-item" data-page="buat-surat" onclick="navigateTo('buat-surat')">
+                        <i class="fas fa-plus-circle"></i>
+                        <span>Buat Surat Baru</span>
+                    </a>
+                    <a href="#" class="nav-item" data-page="daftar-surat" onclick="navigateTo('daftar-surat')">
+                        <i class="fas fa-list-alt"></i>
+                        <span>Daftar Surat</span>
+                        <span class="nav-badge" id="suratCount">0</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <span class="nav-section-title">DOKUMEN</span>
+                    <a href="#" class="nav-item" data-page="upload-dokumen" onclick="navigateTo('upload-dokumen')">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span>Upload Dokumen</span>
+                    </a>
+                    <a href="#" class="nav-item" data-page="arsip-dokumen" onclick="navigateTo('arsip-dokumen')">
+                        <i class="fas fa-archive"></i>
+                        <span>Arsip Dokumen</span>
+                        <span class="nav-badge" id="arsipCount">0</span>
+                    </a>
+                    <a href="#" class="nav-item" data-page="folder-manager" onclick="navigateTo('folder-manager')">
+                        <i class="fas fa-folder-tree"></i>
+                        <span>Manajemen Folder</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <span class="nav-section-title">LAPORAN</span>
+                    <a href="#" class="nav-item" data-page="statistik" onclick="navigateTo('statistik')">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Statistik</span>
+                    </a>
+                    <a href="#" class="nav-item" data-page="cetak-laporan" onclick="navigateTo('cetak-laporan')">
+                        <i class="fas fa-print"></i>
+                        <span>Cetak Laporan</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <span class="nav-section-title">PENGATURAN</span>
+                    <a href="#" class="nav-item" data-page="pengaturan" onclick="navigateTo('pengaturan')">
+                        <i class="fas fa-cog"></i>
+                        <span>Pengaturan</span>
+                    </a>
+                    <a href="#" class="nav-item logout" onclick="handleLogout()">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Keluar</span>
+                    </a>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <p>CORSEC LENS v1.0.0</p>
+                <p>&copy; 2025 Bank Sulselbar</p>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top Header -->
+            <header class="top-header">
+                <div class="header-left">
+                    <button class="menu-toggle" id="menuToggle" onclick="toggleSidebar()">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <div class="header-title">
+                        <h1 id="pageTitle">Dashboard</h1>
+                        <div class="breadcrumb">
+                            <span>Bank Sulselbar</span>
+                            <i class="fas fa-chevron-right"></i>
+                            <span>Corporate Secretary</span>
+                            <i class="fas fa-chevron-right"></i>
+                            <span id="breadcrumbCurrent">Dashboard</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="header-search">
+                        <i class="fas fa-search"></i>
+                        <input type="text" placeholder="Cari surat atau dokumen..." id="globalSearch" onkeyup="handleGlobalSearch(event)">
+                    </div>
+                    <button class="header-btn" onclick="toggleNotifications()">
+                        <i class="fas fa-bell"></i>
+                        <span class="notification-badge">3</span>
+                    </button>
+                    <div class="header-user">
+                        <img src="logo-bank-sulselbar.png" alt="User" class="header-avatar">
+                        <span id="headerUserName">Safirah W.I.</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Page Content Container -->
+            <div class="page-content">
+                <!-- Dashboard Page -->
+                <div class="page" id="dashboardPage">
+                    <div class="welcome-banner">
+                        <div class="welcome-text">
+                            <h2>Selamat Datang, <span id="welcomeName">Safirah</span>! 👋</h2>
+                            <p>Kelola naskah dinas Anda dengan mudah dan efisien</p>
+                        </div>
+                        <div class="welcome-date">
+                            <i class="fas fa-calendar-alt"></i>
+                            <span id="currentDate"></span>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card blue">
+                            <div class="stat-icon">
+                                <i class="fas fa-file-alt"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="totalSurat">0</h3>
+                                <p>Total Surat</p>
+                            </div>
+                            <div class="stat-trend up">
+                                <i class="fas fa-arrow-up"></i> 12%
+                            </div>
+                        </div>
+                        <div class="stat-card green">
+                            <div class="stat-icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="suratSelesai">0</h3>
+                                <p>Surat Selesai</p>
+                            </div>
+                            <div class="stat-trend up">
+                                <i class="fas fa-arrow-up"></i> 8%
+                            </div>
+                        </div>
+                        <div class="stat-card orange">
+                            <div class="stat-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="suratProses">0</h3>
+                                <p>Dalam Proses</p>
+                            </div>
+                            <div class="stat-trend down">
+                                <i class="fas fa-arrow-down"></i> 3%
+                            </div>
+                        </div>
+                        <div class="stat-card purple">
+                            <div class="stat-icon">
+                                <i class="fas fa-folder"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="totalDokumen">0</h3>
+                                <p>Total Dokumen</p>
+                            </div>
+                            <div class="stat-trend up">
+                                <i class="fas fa-arrow-up"></i> 15%
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <div class="dashboard-card recent-activity">
+                            <div class="card-header">
+                                <h3><i class="fas fa-history"></i> Aktivitas Terbaru</h3>
+                                <a href="#" onclick="navigateTo('daftar-surat')">Lihat Semua</a>
+                            </div>
+                            <div class="activity-list" id="activityList">
+                                <!-- Dynamic content -->
+                            </div>
+                        </div>
+
+                        <div class="dashboard-card quick-actions">
+                            <div class="card-header">
+                                <h3><i class="fas fa-bolt"></i> Aksi Cepat</h3>
+                            </div>
+                            <div class="quick-action-grid">
+                                <button class="quick-action-btn" onclick="navigateTo('buat-surat')">
+                                    <i class="fas fa-plus"></i>
+                                    <span>Buat Surat</span>
+                                </button>
+                                <button class="quick-action-btn" onclick="navigateTo('upload-dokumen')">
+                                    <i class="fas fa-upload"></i>
+                                    <span>Upload</span>
+                                </button>
+                                <button class="quick-action-btn" onclick="navigateTo('arsip-dokumen')">
+                                    <i class="fas fa-archive"></i>
+                                    <span>Arsip</span>
+                                </button>
+                                <button class="quick-action-btn" onclick="navigateTo('cetak-laporan')">
+                                    <i class="fas fa-print"></i>
+                                    <span>Cetak</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="dashboard-card chart-card">
+                            <div class="card-header">
+                                <h3><i class="fas fa-chart-pie"></i> Statistik Bulanan</h3>
+                            </div>
+                            <canvas id="monthlyChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Buat Surat Page -->
+                <div class="page" id="buatSuratPage" style="display: none;">
+                    <div class="page-header">
+                        <h2><i class="fas fa-plus-circle"></i> Buat Surat Baru</h2>
+                        <p>Buat naskah dinas dengan penomoran otomatis</p>
+                    </div>
+
+                    <div class="form-container">
+                        <form id="suratForm" onsubmit="handleCreateSurat(event)">
+                            <div class="form-section">
+                                <h3><i class="fas fa-info-circle"></i> Informasi Surat</h3>
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label for="jenisSurat">Jenis Surat <span class="required">*</span></label>
+                                        <select id="jenisSurat" required onchange="updateNomorPreview()">
+                                            <option value="">Pilih Jenis Surat</option>
+                                            <option value="Surat Keluar">Surat Keluar</option>
+                                            <option value="Memo Internal">Memo Internal</option>
+                                            <option value="Surat Keputusan">Surat Keputusan</option>
+                                            <option value="Surat Edaran">Surat Edaran</option>
+                                            <option value="Surat Undangan">Surat Undangan</option>
+                                            <option value="Surat Tugas">Surat Tugas</option>
+                                            <option value="Nota Dinas">Nota Dinas</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="divisiSurat">Divisi Pengirim <span class="required">*</span></label>
+                                        <select id="divisiSurat" required onchange="updateNomorPreview()">
+                                            <option value="">Pilih Divisi</option>
+                                            <option value="Corporate Secretary" selected>Corporate Secretary</option>
+                                            <option value="Direktorat Kepatuhan">Direktorat Kepatuhan</option>
+                                            <option value="Divisi SDM">Divisi SDM</option>
+                                            <option value="Divisi Kredit">Divisi Kredit</option>
+                                            <option value="Divisi Dana">Divisi Dana</option>
+                                            <option value="Divisi Operasional">Divisi Operasional</option>
+                                            <option value="Divisi IT">Divisi IT</option>
+                                            <option value="Divisi Legal">Divisi Legal</option>
+                                            <option value="Divisi Umum">Divisi Umum</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="sifatSurat">Sifat <span class="required">*</span></label>
+                                        <select id="sifatSurat" required>
+                                            <option value="">Pilih Sifat</option>
+                                            <option value="Biasa">Biasa</option>
+                                            <option value="Segera">Segera</option>
+                                            <option value="Sangat Segera">Sangat Segera</option>
+                                            <option value="Rahasia">Rahasia</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="tanggalSurat">Tanggal Surat <span class="required">*</span></label>
+                                        <input type="date" id="tanggalSurat" required>
+                                    </div>
+                                </div>
+
+                                <div class="nomor-preview">
+                                    <label>Preview Nomor Surat:</label>
+                                    <div class="nomor-display" id="nomorPreview">-/---/---/--/----</div>
+                                </div>
+                            </div>
+
+                            <div class="form-section">
+                                <h3><i class="fas fa-envelope"></i> Detail Surat</h3>
+                                <div class="form-grid">
+                                    <div class="form-group full-width">
+                                        <label for="kepadaSurat">Kepada <span class="required">*</span></label>
+                                        <input type="text" id="kepadaSurat" placeholder="Contoh: Direktur Utama Bank Sulselbar" required>
+                                    </div>
+                                    <div class="form-group full-width">
+                                        <label for="perihalSurat">Perihal <span class="required">*</span></label>
+                                        <textarea id="perihalSurat" rows="3" placeholder="Masukkan perihal surat" required></textarea>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="lampiranSurat">Lampiran</label>
+                                        <input type="text" id="lampiranSurat" placeholder="Contoh: 1 (Satu) Berkas">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="tembusan">Tembusan</label>
+                                        <input type="text" id="tembusan" placeholder="Contoh: Arsip">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-section">
+                                <h3><i class="fas fa-paperclip"></i> Lampiran Dokumen</h3>
+                                <div class="file-upload-area" id="dropZone">
+                                    <i class="fas fa-cloud-upload-alt"></i>
+                                    <p>Drag & drop file di sini atau</p>
+                                    <label for="fileInput" class="btn-upload">Pilih File</label>
+                                    <input type="file" id="fileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx" onchange="handleFileSelect(event)">
+                                    <span class="file-info">PDF, DOC, DOCX, XLS, XLSX (Max 10MB per file)</span>
+                                </div>
+                                <div class="file-list" id="fileList"></div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="button" class="btn-secondary" onclick="resetForm()">
+                                    <i class="fas fa-undo"></i> Reset
+                                </button>
+                                <button type="button" class="btn-secondary" onclick="saveDraft()">
+                                    <i class="fas fa-save"></i> Simpan Draft
+                                </button>
+                                <button type="submit" class="btn-primary">
+                                    <i class="fas fa-paper-plane"></i> Buat Surat
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Daftar Surat Page -->
+                <div class="page" id="daftarSuratPage" style="display: none;">
+                    <div class="page-header">
+                        <h2><i class="fas fa-list-alt"></i> Daftar Surat</h2>
+                        <p>Kelola semua naskah dinas yang telah dibuat</p>
+                    </div>
+
+                    <div class="list-toolbar">
+                        <div class="toolbar-left">
+                            <div class="search-box">
+                                <i class="fas fa-search"></i>
+                                <input type="text" placeholder="Cari nomor surat atau perihal..." id="searchSurat" onkeyup="filterSuratList()">
+                            </div>
+                            <select id="filterJenis" onchange="filterSuratList()">
+                                <option value="">Semua Jenis</option>
+                                <option value="Surat Keluar">Surat Keluar</option>
+                                <option value="Memo Internal">Memo Internal</option>
+                                <option value="Surat Keputusan">Surat Keputusan</option>
+                                <option value="Surat Edaran">Surat Edaran</option>
+                                <option value="Surat Undangan">Surat Undangan</option>
+                            </select>
+                            <select id="filterStatus" onchange="filterSuratList()">
+                                <option value="">Semua Status</option>
+                                <option value="Draft">Draft</option>
+                                <option value="Selesai">Selesai</option>
+                                <option value="Proses">Proses</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-right">
+                            <button class="btn-icon" onclick="exportToExcel()">
+                                <i class="fas fa-file-excel"></i>
+                            </button>
+                            <button class="btn-icon" onclick="printList()">
+                                <i class="fas fa-print"></i>
+                            </button>
+                            <button class="btn-primary" onclick="navigateTo('buat-surat')">
+                                <i class="fas fa-plus"></i> Buat Surat
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="data-table-container">
+                        <table class="data-table" id="suratTable">
+                            <thead>
+                                <tr>
+                                    <th>No</th>
+                                    <th>Nomor Surat</th>
+                                    <th>Tanggal</th>
+                                    <th>Jenis</th>
+                                    <th>Perihal</th>
+                                    <th>Kepada</th>
+                                    <th>Status</th>
+                                    <th>Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="suratTableBody">
+                                <!-- Dynamic content -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="pagination" id="pagination">
+                        <!-- Dynamic pagination -->
+                    </div>
+                </div>
+
+                <!-- Upload Dokumen Page -->
+                <div class="page" id="uploadDokumenPage" style="display: none;">
+                    <div class="page-header">
+                        <h2><i class="fas fa-cloud-upload-alt"></i> Upload Dokumen</h2>
+                        <p>Unggah dokumen pendukung atau arsip</p>
+                    </div>
+
+                    <div class="upload-container">
+                        <div class="upload-zone" id="uploadDropZone">
+                            <div class="upload-icon">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                            </div>
+                            <h3>Drag & Drop File</h3>
+                            <p>atau klik untuk memilih file</p>
+                            <input type="file" id="uploadFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" onchange="handleUploadFile(event)">
+                            <span class="upload-hint">PDF, DOC, DOCX, XLS, XLSX, JPG, PNG (Max 25MB)</span>
+                        </div>
+
+                        <div class="upload-options">
+                            <div class="form-group">
+                                <label for="uploadKategori">Kategori Dokumen</label>
+                                <select id="uploadKategori">
+                                    <option value="Umum">Umum</option>
+                                    <option value="Surat Masuk">Surat Masuk</option>
+                                    <option value="Surat Keluar">Surat Keluar</option>
+                                    <option value="Laporan">Laporan</option>
+                                    <option value="Notulen">Notulen</option>
+                                    <option value="Lainnya">Lainnya</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="uploadKeterangan">Keterangan</label>
+                                <textarea id="uploadKeterangan" rows="3" placeholder="Tambahkan keterangan dokumen..."></textarea>
+                            </div>
+                        </div>
+
+                        <div class="upload-queue" id="uploadQueue">
+                            <!-- Dynamic upload queue -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Arsip Dokumen Page -->
+                <div class="page" id="arsipDokumenPage" style="display: none;">
+                    <div class="page-header">
+                        <h2><i class="fas fa-archive"></i> Arsip Dokumen</h2>
+                        <p>Kelola semua dokumen yang telah diunggah</p>
+                    </div>
+
+                    <div class="list-toolbar">
+                        <div class="toolbar-left">
+                            <div class="search-box">
+                                <i class="fas fa-search"></i>
+                                <input type="text" placeholder="Cari dokumen..." id="searchDokumen" onkeyup="filterDokumenList()">
+                            </div>
+                            <select id="filterKategori" onchange="filterDokumenList()">
+                                <option value="">Semua Kategori</option>
+                                <option value="Surat Masuk">Surat Masuk</option>
+                                <option value="Surat Keluar">Surat Keluar</option>
+                                <option value="Laporan">Laporan</option>
+                                <option value="Notulen">Notulen</option>
+                                <option value="Lainnya">Lainnya</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-right">
+                            <button class="btn-view-toggle active" id="gridViewBtn" onclick="setView('grid')">
+                                <i class="fas fa-th"></i>
+                            </button>
+                            <button class="btn-view-toggle" id="listViewBtn" onclick="setView('list')">
+                                <i class="fas fa-list"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="dokumen-grid" id="dokumenGrid">
+                        <!-- Dynamic content -->
+                    </div>
+                </div>
+
+                <!-- Folder Manager Page -->
+                <div class="page" id="folderManagerPage" style="display: none;">
+                    <div class="page-header">
+                        <h2><i class="fas fa-folder-tree"></i> Manajemen Folder</h2>
+                        <p>Struktur folder dokumen berdasarkan nomor dan perihal surat</p>
+                    </div>
+
+                    <div class="folder-container">
+                        <div class="folder-tree" id="folderTree">
+                            <!-- Dynamic folder tree -->
+                        </div>
+                        <div class="folder-content" id="folderContent">
+                            <div class="empty-state">
+                                <i class="fas fa-folder-open"></i>
+                                <p>Pilih folder untuk melihat isi dokumen</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Statistik Page -->
+                <div class="page" id="statistikPage" style="display: none;">
+                    <div class="page-header">
+                        <h2><i class="fas fa-chart-bar"></i> Statistik</h2>
+                        <p>Analisis dan laporan penomoran surat</p>
+                    </div>
+
+                    <div class="stats-overview">
+                        <div class="stats-period">
+                            <label>Periode:</label>
+                            <select id="statsPeriod" onchange="updateStatistics()">
+                                <option value="week">Minggu Ini</option>
+                                <option value="month" selected>Bulan Ini</option>
+                                <option value="quarter">Kuartal Ini</option>
+                                <option value="year">Tahun Ini</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="chart-grid">
+                        <div class="chart-card">
+                            <h3>Surat per Jenis</h3>
+                            <canvas id="chartByType"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h3>Tren Bulanan</h3>
+                            <canvas id="chartTrend"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h3>Surat per Divisi</h3>
+                            <canvas id="chartByDivision"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h3>Status Surat</h3>
+                            <canvas id="chartByStatus"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cetak Laporan Page -->
+                <div class="page" id="cetakLaporanPage" style="display: none;">
+                    <div class="page-header">
+                        <h2><i class="fas fa-print"></i> Cetak Laporan</h2>
+                        <p>Generate dan cetak laporan penomoran surat</p>
+                    </div>
+
+                    <div class="report-options">
+                        <div class="form-section">
+                            <h3>Pilih Jenis Laporan</h3>
+                            <div class="report-types">
+                                <label class="report-type-option">
+                                    <input type="radio" name="reportType" value="rekap" checked>
+                                    <div class="option-card">
+                                        <i class="fas fa-file-alt"></i>
+                                        <span>Rekap Surat</span>
+                                    </div>
+                                </label>
+                                <label class="report-type-option">
+                                    <input type="radio" name="reportType" value="register">
+                                    <div class="option-card">
+                                        <i class="fas fa-book"></i>
+                                        <span>Register Surat</span>
+                                    </div>
+                                </label>
+                                <label class="report-type-option">
+                                    <input type="radio" name="reportType" value="statistik">
+                                    <div class="option-card">
+                                        <i class="fas fa-chart-pie"></i>
+                                        <span>Statistik</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h3>Filter Periode</h3>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>Dari Tanggal</label>
+                                    <input type="date" id="reportDateFrom">
+                                </div>
+                                <div class="form-group">
+                                    <label>Sampai Tanggal</label>
+                                    <input type="date" id="reportDateTo">
+                                </div>
+                                <div class="form-group">
+                                    <label>Jenis Surat</label>
+                                    <select id="reportJenis">
+                                        <option value="">Semua Jenis</option>
+                                        <option value="Surat Keluar">Surat Keluar</option>
+                                        <option value="Memo Internal">Memo Internal</option>
+                                        <option value="Surat Keputusan">Surat Keputusan</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Format</label>
+                                    <select id="reportFormat">
+                                        <option value="pdf">PDF</option>
+                                        <option value="excel">Excel</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button class="btn-secondary" onclick="previewReport()">
+                                <i class="fas fa-eye"></i> Preview
+                            </button>
+                            <button class="btn-primary" onclick="generateReport()">
+                                <i class="fas fa-download"></i> Download Laporan
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pengaturan Page -->
+                <div class="page" id="pengaturanPage" style="display: none;">
+                    <div class="page-header">
+                        <h2><i class="fas fa-cog"></i> Pengaturan</h2>
+                        <p>Konfigurasi aplikasi dan profil pengguna</p>
+                    </div>
+
+                    <div class="settings-container">
+                        <div class="settings-section">
+                            <h3><i class="fas fa-user"></i> Profil Pengguna</h3>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label>Nama Lengkap</label>
+                                    <input type="text" id="settingName" value="Safirah Wardinah Irianto">
+                                </div>
+                                <div class="form-group">
+                                    <label>NIP</label>
+                                    <input type="text" id="settingNIP" value="199501012020012001">
+                                </div>
+                                <div class="form-group">
+                                    <label>Jabatan</label>
+                                    <input type="text" id="settingJabatan" value="Asisten Administrasi">
+                                </div>
+                                <div class="form-group">
+                                    <label>Divisi</label>
+                                    <input type="text" id="settingDivisi" value="Corporate Secretary" readonly>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3><i class="fas fa-bell"></i> Notifikasi</h3>
+                            <div class="settings-toggle">
+                                <label>
+                                    <input type="checkbox" checked>
+                                    <span>Notifikasi surat baru</span>
+                                </label>
+                                <label>
+                                    <input type="checkbox" checked>
+                                    <span>Pengingat deadline</span>
+                                </label>
+                                <label>
+                                    <input type="checkbox">
+                                    <span>Notifikasi email</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3><i class="fas fa-lock"></i> Keamanan</h3>
+                            <button class="btn-secondary" onclick="showChangePassword()">
+                                <i class="fas fa-key"></i> Ubah Password
+                            </button>
+                        </div>
+
+                        <div class="form-actions">
+                            <button class="btn-primary" onclick="saveSettings()">
+                                <i class="fas fa-save"></i> Simpan Pengaturan
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Detail Modal -->
+    <div class="modal" id="detailModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2 id="modalTitle">Detail Surat</h2>
+                <button class="modal-close" onclick="closeModal('detailModal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Dynamic content -->
+            </div>
+            <div class="modal-footer" id="modalFooter">
+                <!-- Dynamic buttons -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
