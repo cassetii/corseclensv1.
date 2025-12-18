@@ -31,14 +31,19 @@ let uploadIntervals = [];
 let autoSaveInterval = null;
 let dragDropInitialized = false;
 
-// Counter penomoran untuk setiap jenis surat
+// Counter penomoran untuk setiap jenis surat (sesuai format Bank Sulselbar)
 let nomorCounters = {
-    'Surat Keluar': 1,
-    'Memo Internal': 1,
+    'Surat Biasa': 1,
+    'Surat Rahasia': 1,
     'Surat Keputusan': 1,
     'Surat Edaran': 1,
-    'Surat Undangan': 1,
+    'Memo Direksi': 1,
+    'Memo Corsec': 1,
+    'PKS': 1,
+    'MoU': 1,
+    'Notulen Radir': 1,
     'Surat Tugas': 1,
+    'Surat Undangan': 1,
     'Nota Dinas': 1
 };
 
@@ -160,14 +165,15 @@ function saveToStorage() {
 
 function loadSampleData() {
     const now = Date.now();
+    // Sample data dengan format penomoran Bank Sulselbar yang benar
     suratData = [
         {
             id: now,
-            nomor: 'SK/001/CORSEC/11/2025',
-            jenis: 'Surat Keluar',
+            nomor: 'SR/001/B/DCS/XII/25',
+            jenis: 'Surat Biasa',
             divisi: 'Corporate Secretary',
-            sifat: 'Sangat Segera',
-            tanggal: '2025-11-28',
+            sifat: 'Biasa',
+            tanggal: '2025-12-18',
             kepada: 'Direktur Utama Bank Sulselbar',
             perihal: 'Laporan Pelaksanaan Rapat Umum Pemegang Saham Tahunan (RUPST) 2025',
             lampiran: '3 (Tiga) Berkas',
@@ -179,15 +185,15 @@ function loadSampleData() {
         },
         {
             id: now + 1,
-            nomor: 'UND/002/CORSEC/11/2025',
-            jenis: 'Surat Undangan',
-            divisi: 'Corporate Secretary',
+            nomor: 'SK/001/DIR/XII/2025',
+            jenis: 'Surat Keputusan',
+            divisi: 'Direksi',
             sifat: 'Segera',
-            tanggal: '2025-11-27',
-            kepada: 'Seluruh Direksi dan Komisaris',
-            perihal: 'Undangan Rapat Koordinasi Triwulanan Q4 2025',
-            lampiran: '1 (Satu) Agenda',
-            tembusan: 'Sekretaris Perusahaan',
+            tanggal: '2025-12-17',
+            kepada: 'Seluruh Pegawai Bank Sulselbar',
+            perihal: 'Pemberian Penghargaan Masa Kerja Kepada Pegawai PT Bank Sulselbar',
+            lampiran: '1 (Satu) Lampiran',
+            tembusan: 'Divisi Human Capital',
             status: 'Selesai',
             files: [],
             createdAt: new Date().toISOString(),
@@ -195,12 +201,12 @@ function loadSampleData() {
         },
         {
             id: now + 2,
-            nomor: 'MI/003/CORSEC/11/2025',
-            jenis: 'Memo Internal',
+            nomor: 'MM/0001/DCS/XII/2025',
+            jenis: 'Memo Corsec',
             divisi: 'Corporate Secretary',
             sifat: 'Biasa',
-            tanggal: '2025-11-26',
-            kepada: 'Seluruh Kepala Divisi',
+            tanggal: '2025-12-16',
+            kepada: 'Divisi Human Capital',
             perihal: 'Pemberitahuan Jadwal Libur Akhir Tahun 2025',
             lampiran: '-',
             tembusan: 'Arsip',
@@ -211,13 +217,13 @@ function loadSampleData() {
         },
         {
             id: now + 3,
-            nomor: 'ND/004/CORSEC/11/2025',
-            jenis: 'Nota Dinas',
+            nomor: 'SR/001/R/DCS/XII/25',
+            jenis: 'Surat Rahasia',
             divisi: 'Corporate Secretary',
-            sifat: 'Sangat Segera',
-            tanggal: '2025-11-25',
-            kepada: 'Direktur Kepatuhan',
-            perihal: 'Permohonan Review Dokumen Kebijakan Good Corporate Governance',
+            sifat: 'Rahasia',
+            tanggal: '2025-12-15',
+            kepada: 'Dewan Komisaris',
+            perihal: 'Tanggapan Surat OJK & Usulan Agenda Tambahan RUPS LB',
             lampiran: '2 (Dua) Dokumen',
             tembusan: 'Arsip',
             status: 'Draft',
@@ -227,11 +233,11 @@ function loadSampleData() {
         },
         {
             id: now + 4,
-            nomor: 'SE/001/CORSEC/11/2025',
+            nomor: 'SE/001/DIR/XII/2025',
             jenis: 'Surat Edaran',
-            divisi: 'Corporate Secretary',
+            divisi: 'Direksi',
             sifat: 'Biasa',
-            tanggal: '2025-11-24',
+            tanggal: '2025-12-14',
             kepada: 'Seluruh Karyawan Bank Sulselbar',
             perihal: 'Tata Cara Penggunaan Aplikasi CORSEC LENS',
             lampiran: '1 (Satu) Panduan',
@@ -240,17 +246,39 @@ function loadSampleData() {
             files: [],
             createdAt: new Date().toISOString(),
             createdBy: 'Safirah Wardinah Irianto'
+        },
+        {
+            id: now + 5,
+            nomor: '001/PKS-BSSB/DJS/XII/2025',
+            jenis: 'PKS',
+            divisi: 'Divisi Jasa',
+            sifat: 'Biasa',
+            tanggal: '2025-12-13',
+            kepada: 'PT Airport Lounge Indonesia',
+            perihal: 'Perjanjian Penggunaan Fasilitas Airport Lounge',
+            lampiran: '5 (Lima) Dokumen',
+            tembusan: 'Divisi Legal',
+            status: 'Selesai',
+            files: [],
+            createdAt: new Date().toISOString(),
+            createdBy: 'Safirah Wardinah Irianto'
         }
     ];
     
+    // Counter dengan format baru
     nomorCounters = {
-        'Surat Keluar': 2,
-        'Memo Internal': 4,
-        'Surat Keputusan': 1,
+        'Surat Biasa': 2,
+        'Surat Rahasia': 2,
+        'Surat Keputusan': 2,
         'Surat Edaran': 2,
-        'Surat Undangan': 3,
+        'Memo Direksi': 1,
+        'Memo Corsec': 2,
+        'PKS': 2,
+        'MoU': 1,
+        'Notulen Radir': 1,
         'Surat Tugas': 1,
-        'Nota Dinas': 5
+        'Surat Undangan': 1,
+        'Nota Dinas': 1
     };
     
     saveToStorage();
@@ -615,23 +643,99 @@ function updateNomorPreview() {
     }
 }
 
-function generateNomorSurat(jenis, divisi) {
-    var year = new Date().getFullYear();
-    var month = String(new Date().getMonth() + 1).padStart(2, '0');
-    var counter = String(nomorCounters[jenis] || 1).padStart(3, '0');
+// ========================================
+// FUNGSI KONVERSI BULAN KE ROMAWI
+// ========================================
+function getBulanRomawi(month) {
+    var romawi = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+    return romawi[month] || 'I';
+}
+
+// ========================================
+// GENERATE NOMOR SURAT - FORMAT BANK SULSELBAR
+// ========================================
+function generateNomorSurat(jenis, divisi, sifat) {
+    var now = new Date();
+    var year = now.getFullYear();
+    var year2digit = String(year).slice(-2);
+    var monthIndex = now.getMonth();
+    var bulanRomawi = getBulanRomawi(monthIndex);
     
-    var kodeJenis = {
-        'Surat Keluar': 'SK', 'Memo Internal': 'MI', 'Surat Keputusan': 'KEP',
-        'Surat Edaran': 'SE', 'Surat Undangan': 'UND', 'Surat Tugas': 'ST', 'Nota Dinas': 'ND'
-    };
+    var counter3 = String(nomorCounters[jenis] || 1).padStart(3, '0');
+    var counter4 = String(nomorCounters[jenis] || 1).padStart(4, '0');
     
+    // Kode divisi sesuai standar Bank Sulselbar
     var kodeDivisi = {
-        'Corporate Secretary': 'CORSEC', 'Direktorat Kepatuhan': 'COMP', 'Divisi SDM': 'SDM',
-        'Divisi Kredit': 'KRD', 'Divisi Dana': 'DANA', 'Divisi Operasional': 'OPS',
-        'Divisi IT': 'IT', 'Divisi Legal': 'LEG', 'Divisi Umum': 'UMM'
+        'Corporate Secretary': 'DCS',
+        'Divisi Human Capital': 'DHC',
+        'Divisi Jasa': 'DJS',
+        'Divisi Dana & Layanan': 'DDL',
+        'Divisi Retail & Kredit': 'DRK',
+        'Divisi Kredit Korporasi': 'DKK',
+        'Divisi Kepatuhan': 'DKP',
+        'Divisi Internasional & Business': 'DIB',
+        'Divisi Umum': 'DUM',
+        'SIMO': 'SIMO',
+        'Manajemen Risiko': 'SKMR',
+        'Direksi': 'DIR'
     };
     
-    return (kodeJenis[jenis] || 'XX') + '/' + counter + '/' + (kodeDivisi[divisi] || 'XXX') + '/' + month + '/' + year;
+    var kode = kodeDivisi[divisi] || 'DCS';
+    
+    // Format nomor berdasarkan jenis surat (sesuai Excel Penomoran 2025)
+    switch(jenis) {
+        case 'Surat Biasa':
+            // Format: SR/{counter}/B/DCS/{bulan}/{tahun_2digit}
+            return 'SR/' + counter3 + '/B/' + kode + '/' + bulanRomawi + '/' + year2digit;
+            
+        case 'Surat Rahasia':
+            // Format: SR/{counter}/R/DCS/{bulan}/{tahun_2digit}
+            return 'SR/' + counter3 + '/R/' + kode + '/' + bulanRomawi + '/' + year2digit;
+            
+        case 'Surat Keputusan':
+            // Format: SK/{counter}/DIR/{bulan}/{tahun}
+            return 'SK/' + counter3 + '/DIR/' + bulanRomawi + '/' + year;
+            
+        case 'Surat Edaran':
+            // Format: SE/{counter}/DIR/{bulan}/{tahun}
+            return 'SE/' + counter3 + '/DIR/' + bulanRomawi + '/' + year;
+            
+        case 'Memo Direksi':
+            // Format: MM/{counter_4digit}/DIR/{bulan}/{tahun}
+            return 'MM/' + counter4 + '/DIR/' + bulanRomawi + '/' + year;
+            
+        case 'Memo Corsec':
+            // Format: MM/{counter_4digit}/DCS/{bulan}/{tahun}
+            return 'MM/' + counter4 + '/DCS/' + bulanRomawi + '/' + year;
+            
+        case 'PKS':
+            // Format: {counter}/PKS-BSSB/{divisi}/{bulan}/{tahun}
+            return counter3 + '/PKS-BSSB/' + kode + '/' + bulanRomawi + '/' + year;
+            
+        case 'MoU':
+            // Format: {counter}/MOU-BSSB/{bulan}/{tahun}
+            return counter3 + '/MOU-BSSB/' + bulanRomawi + '/' + year;
+            
+        case 'Notulen Radir':
+            // Format: {counter}/RADIR/{divisi}/{bulan}/{tahun}
+            return counter3 + '/RADIR/' + kode + '/' + bulanRomawi + '/' + year;
+            
+        case 'Surat Tugas':
+            // Format: ST/{counter}/DCS/{bulan}/{tahun}
+            return 'ST/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
+            
+        case 'Surat Undangan':
+            // Format: UND/{counter}/DCS/{bulan}/{tahun}
+            return 'UND/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
+            
+        case 'Nota Dinas':
+            // Format: ND/{counter}/DCS/{bulan}/{tahun}
+            return 'ND/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
+            
+        default:
+            // Default format
+            return 'SR/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
+    }
 }
 
 function handleCreateSurat(event) {
