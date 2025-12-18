@@ -1,7 +1,11 @@
 /**
  * CORSEC LENS - Aplikasi Penomoran Naskah Dinas
  * PT Bank Sulselbar - Divisi Corporate Secretary
- * Version 1.0.2 - Bug Fixed
+ * Version 1.0.3 - Chart Bug Fixed
+ * 
+ * Changelog v1.0.3:
+ * - Fixed: Chart BENAR-BENAR dibersihkan dengan clearRect()
+ * - Added: Helper function destroyChart() untuk clear canvas
  * 
  * Changelog v1.0.2:
  * - Fixed: Chart infinite bertambah saat navigasi cepat
@@ -10,6 +14,7 @@
  * - Fixed: Event listener accumulation
  * - Fixed: Undefined event variable di openFolder
  * - Added: Proper cleanup untuk semua timeouts/intervals
+ * - Updated: Format penomoran sesuai Bank Sulselbar
  */
 
 // ========================================
@@ -567,15 +572,28 @@ function renderActivityList() {
     activityList.innerHTML = html;
 }
 
-function initCharts() {
-    var ctx = document.getElementById('monthlyChart');
-    if (!ctx || typeof Chart === 'undefined') return;
-    
-    if (window.monthlyChart instanceof Chart) {
-        window.monthlyChart.destroy();
+// ========================================
+// CHART HELPER - Destroy dan Clear Canvas
+// ========================================
+function destroyChart(chartInstance, canvasElement) {
+    if (chartInstance instanceof Chart) {
+        chartInstance.destroy();
     }
+    if (canvasElement) {
+        var ctx = canvasElement.getContext('2d');
+        ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    }
+    return null;
+}
+
+function initCharts() {
+    var canvas = document.getElementById('monthlyChart');
+    if (!canvas || typeof Chart === 'undefined') return;
     
-    window.monthlyChart = new Chart(ctx, {
+    // Destroy dan clear canvas
+    window.monthlyChart = destroyChart(window.monthlyChart, canvas);
+    
+    window.monthlyChart = new Chart(canvas, {
         type: 'line',
         data: {
             labels: ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'],
@@ -1349,12 +1367,14 @@ function openFolder(folderId, type, evt) {
 // ========================================
 // STATISTICS
 // ========================================
+
 function initStatisticsCharts() {
     if (typeof Chart === 'undefined') return;
     
+    // Chart By Type (Doughnut)
     var ctxType = document.getElementById('chartByType');
     if (ctxType) {
-        if (window.chartByType instanceof Chart) window.chartByType.destroy();
+        window.chartByType = destroyChart(window.chartByType, ctxType);
         var typeData = {};
         suratData.forEach(function(s) { typeData[s.jenis] = (typeData[s.jenis] || 0) + 1; });
         window.chartByType = new Chart(ctxType, {
@@ -1364,9 +1384,10 @@ function initStatisticsCharts() {
         });
     }
     
+    // Chart Trend (Bar - Bulanan)
     var ctxTrend = document.getElementById('chartTrend');
     if (ctxTrend) {
-        if (window.chartTrend instanceof Chart) window.chartTrend.destroy();
+        window.chartTrend = destroyChart(window.chartTrend, ctxTrend);
         window.chartTrend = new Chart(ctxTrend, {
             type: 'bar',
             data: { labels: ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'], datasets: [{ label: 'Surat', data: getMonthlyData(), backgroundColor: '#1B5E9E' }] },
@@ -1374,9 +1395,10 @@ function initStatisticsCharts() {
         });
     }
     
+    // Chart By Division (Pie)
     var ctxDiv = document.getElementById('chartByDivision');
     if (ctxDiv) {
-        if (window.chartByDivision instanceof Chart) window.chartByDivision.destroy();
+        window.chartByDivision = destroyChart(window.chartByDivision, ctxDiv);
         var divData = {};
         suratData.forEach(function(s) { divData[s.divisi] = (divData[s.divisi] || 0) + 1; });
         window.chartByDivision = new Chart(ctxDiv, {
@@ -1386,9 +1408,10 @@ function initStatisticsCharts() {
         });
     }
     
+    // Chart By Status (Doughnut)
     var ctxStatus = document.getElementById('chartByStatus');
     if (ctxStatus) {
-        if (window.chartByStatus instanceof Chart) window.chartByStatus.destroy();
+        window.chartByStatus = destroyChart(window.chartByStatus, ctxStatus);
         var statusData = {
             'Selesai': suratData.filter(function(s) { return s.status === 'Selesai'; }).length,
             'Proses': suratData.filter(function(s) { return s.status === 'Proses'; }).length,
@@ -1557,4 +1580,4 @@ window.addEventListener('beforeunload', function() {
     cleanupResources();
 });
 
-console.log('CORSEC LENS v1.0.2 - Bug Fixed - Loaded Successfully');
+console.log('CORSEC LENS v1.0.3 - Chart Bug Fixed - Loaded Successfully');
