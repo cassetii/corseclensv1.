@@ -1,7 +1,15 @@
 /**
  * CORSEC LENS - Aplikasi Penomoran Naskah Dinas
  * PT Bank Sulselbar - Divisi Corporate Secretary
- * Version 1.0.1 - Fixed & Improved
+ * Version 1.0.2 - Bug Fixed
+ * 
+ * Changelog v1.0.2:
+ * - Fixed: Chart infinite bertambah saat navigasi cepat
+ * - Fixed: Memory leak pada upload progress interval
+ * - Fixed: AnimateCounter multiple intervals
+ * - Fixed: Event listener accumulation
+ * - Fixed: Undefined event variable di openFolder
+ * - Added: Proper cleanup untuk semua timeouts/intervals
  */
 
 // ========================================
@@ -13,6 +21,15 @@ let dokumenData = [];
 let uploadedFiles = [];
 let currentPage = 1;
 const itemsPerPage = 10;
+
+// ========================================
+// BUG FIX: Tracking untuk timeouts dan intervals
+// ========================================
+let chartTimeouts = {};
+let counterIntervals = {};
+let uploadIntervals = [];
+let autoSaveInterval = null;
+let dragDropInitialized = false;
 
 // Counter penomoran untuk setiap jenis surat
 let nomorCounters = {
@@ -73,6 +90,47 @@ function initializeApp() {
     initializeDateInputs();
     setupDragAndDrop();
     updateDashboardStats();
+    startAutoSave();
+}
+
+// BUG FIX: Tracked auto-save interval
+function startAutoSave() {
+    if (autoSaveInterval) clearInterval(autoSaveInterval);
+    autoSaveInterval = setInterval(function() { 
+        if (suratData.length > 0 || dokumenData.length > 0) saveToStorage(); 
+    }, 30000);
+}
+
+// BUG FIX: Cleanup function untuk semua resources
+function cleanupResources() {
+    // Clear all chart timeouts
+    Object.values(chartTimeouts).forEach(clearTimeout);
+    chartTimeouts = {};
+    
+    // Clear all counter intervals
+    Object.values(counterIntervals).forEach(clearInterval);
+    counterIntervals = {};
+    
+    // Clear upload intervals
+    uploadIntervals.forEach(clearInterval);
+    uploadIntervals = [];
+    
+    // Clear auto-save
+    if (autoSaveInterval) {
+        clearInterval(autoSaveInterval);
+        autoSaveInterval = null;
+    }
+    
+    // Destroy all charts safely
+    try {
+        if (window.monthlyChart instanceof Chart) window.monthlyChart.destroy();
+        if (window.chartByType instanceof Chart) window.chartByType.destroy();
+        if (window.chartTrend instanceof Chart) window.chartTrend.destroy();
+        if (window.chartByDivision instanceof Chart) window.chartByDivision.destroy();
+        if (window.chartByStatus instanceof Chart) window.chartByStatus.destroy();
+    } catch(e) {
+        console.warn('Chart cleanup error:', e);
+    }
 }
 
 function loadFromStorage() {
@@ -242,6 +300,9 @@ function handleLogin(event) {
 
 function handleLogout() {
     if (confirm('Apakah Anda yakin ingin keluar?')) {
+        // BUG FIX: Cleanup semua resources saat logout
+        cleanupResources();
+        
         currentUser = null;
         localStorage.removeItem('corsecSession');
         sessionStorage.removeItem('corsecSession');
@@ -297,6 +358,14 @@ function togglePassword() {
 // NAVIGATION
 // ========================================
 function navigateTo(pageName) {
+    // BUG FIX: Clear previous timeouts sebelum navigasi
+    Object.values(chartTimeouts).forEach(clearTimeout);
+    chartTimeouts = {};
+    
+    // BUG FIX: Clear upload intervals saat meninggalkan halaman upload
+    uploadIntervals.forEach(clearInterval);
+    uploadIntervals = [];
+    
     var pages = document.querySelectorAll('.page');
     pages.forEach(function(page) {
         page.style.display = 'none';
@@ -352,7 +421,8 @@ function navigateTo(pageName) {
         case 'dashboard':
             updateDashboardStats();
             renderActivityList();
-            setTimeout(initCharts, 100);
+            // BUG FIX: Track timeout untuk bisa di-cancel
+            chartTimeouts.dashboard = setTimeout(initCharts, 100);
             break;
         case 'daftar-surat':
             renderSuratTable();
@@ -364,7 +434,8 @@ function navigateTo(pageName) {
             renderFolderTree();
             break;
         case 'statistik':
-            setTimeout(initStatisticsCharts, 100);
+            // BUG FIX: Track timeout untuk bisa di-cancel
+            chartTimeouts.statistik = setTimeout(initStatisticsCharts, 100);
             break;
         case 'buat-surat':
             initializeDateInputs();
@@ -416,13 +487,26 @@ function animateCounter(elementId, target) {
     var element = document.getElementById(elementId);
     if (!element) return;
     
+    // BUG FIX: Clear interval lama sebelum membuat baru
+    if (counterIntervals[elementId]) {
+        clearInterval(counterIntervals[elementId]);
+        delete counterIntervals[elementId];
+    }
+    
+    // Jika target 0, langsung set tanpa animasi
+    if (target === 0) {
+        element.textContent = '0';
+        return;
+    }
+    
     var current = 0;
     var increment = target / 50;
-    var timer = setInterval(function() {
+    counterIntervals[elementId] = setInterval(function() {
         current += increment;
         if (current >= target) {
             element.textContent = target;
-            clearInterval(timer);
+            clearInterval(counterIntervals[elementId]);
+            delete counterIntervals[elementId];
         } else {
             element.textContent = Math.floor(current);
         }
@@ -909,6 +993,9 @@ function printList() { window.print(); }
 // FILE UPLOAD
 // ========================================
 function setupDragAndDrop() {
+    // BUG FIX: Prevent multiple event listener registration
+    if (dragDropInitialized) return;
+    
     var dropZone = document.getElementById('dropZone');
     var uploadDropZone = document.getElementById('uploadDropZone');
     
@@ -924,6 +1011,8 @@ function setupDragAndDrop() {
             else handleUploadFiles(files);
         });
     });
+    
+    dragDropInitialized = true;
 }
 
 function handleFileSelect(event) { handleFiles(event.target.files); }
@@ -985,10 +1074,22 @@ function handleUploadFiles(files) {
         var progress = 0;
         var progressBar = uploadItem.querySelector('.upload-progress-bar');
         var interval = setInterval(function() {
+            // BUG FIX: Check if element still exists before updating
+            if (!progressBar || !uploadItem.parentNode) {
+                clearInterval(interval);
+                var idx = uploadIntervals.indexOf(interval);
+                if (idx > -1) uploadIntervals.splice(idx, 1);
+                return;
+            }
+            
             progress += Math.random() * 30;
             if (progress >= 100) {
                 progress = 100;
                 clearInterval(interval);
+                
+                // BUG FIX: Remove from tracked intervals
+                var idx = uploadIntervals.indexOf(interval);
+                if (idx > -1) uploadIntervals.splice(idx, 1);
                 
                 dokumenData.push({
                     id: Date.now() + Math.random(),
@@ -1004,7 +1105,7 @@ function handleUploadFiles(files) {
                 saveToStorage();
                 
                 setTimeout(function() {
-                    uploadItem.remove();
+                    if (uploadItem.parentNode) uploadItem.remove();
                     showToast('success', 'Upload Berhasil', file.name);
                     var arsipCount = document.getElementById('arsipCount');
                     if (arsipCount) arsipCount.textContent = dokumenData.length;
@@ -1012,6 +1113,9 @@ function handleUploadFiles(files) {
             }
             if (progressBar) progressBar.style.width = progress + '%';
         }, 200);
+        
+        // BUG FIX: Track interval untuk cleanup
+        uploadIntervals.push(interval);
     });
 }
 
@@ -1075,7 +1179,8 @@ function renderFolderTree() {
     var html = '';
     suratData.forEach(function(surat) {
         var files = dokumenData.filter(function(d) { return d.suratId === surat.id; });
-        html += '<div class="folder-tree-item" onclick="openFolder(' + surat.id + ', \'surat\')">' +
+        // BUG FIX: Pass event parameter
+        html += '<div class="folder-tree-item" onclick="openFolder(' + surat.id + ', \'surat\', event)">' +
             '<i class="fas fa-file-alt"></i><span title="' + surat.perihal + '">' + surat.nomor.replace(/\//g, '-').substring(0, 25) + '</span>' +
             (files.length > 0 ? '<span style="margin-left: auto; font-size: 11px; color: #999; background: #eee; padding: 2px 6px; border-radius: 10px;">' + files.length + '</span>' : '') +
             '</div>';
@@ -1083,7 +1188,8 @@ function renderFolderTree() {
     
     ['Surat Masuk', 'Laporan', 'Notulen', 'Umum', 'Lainnya'].forEach(function(cat) {
         var files = dokumenData.filter(function(d) { return d.kategori === cat && !d.suratId; });
-        html += '<div class="folder-tree-item" onclick="openFolder(\'' + cat + '\', \'category\')">' +
+        // BUG FIX: Pass event parameter
+        html += '<div class="folder-tree-item" onclick="openFolder(\'' + cat + '\', \'category\', event)">' +
             '<i class="fas fa-folder"></i><span>' + cat + '</span>' +
             (files.length > 0 ? '<span style="margin-left: auto; font-size: 11px; color: #999; background: #eee; padding: 2px 6px; border-radius: 10px;">' + files.length + '</span>' : '') +
             '</div>';
@@ -1092,7 +1198,8 @@ function renderFolderTree() {
     folderTree.innerHTML = html;
 }
 
-function openFolder(folderId, type) {
+// BUG FIX: Tambahkan event parameter
+function openFolder(folderId, type, evt) {
     var folderContent = document.getElementById('folderContent');
     if (!folderContent) return;
     
@@ -1111,8 +1218,9 @@ function openFolder(folderId, type) {
     }
     
     document.querySelectorAll('.folder-tree-item').forEach(function(item) { item.classList.remove('active'); });
-    if (event && event.target) {
-        var target = event.target.closest('.folder-tree-item');
+    // BUG FIX: Use evt parameter instead of global event
+    if (evt && evt.target) {
+        var target = evt.target.closest('.folder-tree-item');
         if (target) target.classList.add('active');
     }
     
@@ -1329,8 +1437,8 @@ document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') { document.querySelectorAll('.modal.active').forEach(function(m) { m.classList.remove('active'); }); }
 });
 
-// Auto-save
-setInterval(function() { if (suratData.length > 0 || dokumenData.length > 0) saveToStorage(); }, 30000);
+// BUG FIX: Auto-save sekarang dikelola oleh startAutoSave() yang ter-track
+// setInterval yang lama telah dihapus untuk mencegah memory leak
 
 // Window resize
 window.addEventListener('resize', function() {
@@ -1340,4 +1448,9 @@ window.addEventListener('resize', function() {
     }
 });
 
-console.log('CORSEC LENS v1.0.1 - Loaded Successfully');
+// BUG FIX: Cleanup saat page unload
+window.addEventListener('beforeunload', function() {
+    cleanupResources();
+});
+
+console.log('CORSEC LENS v1.0.2 - Bug Fixed - Loaded Successfully');
