@@ -83,7 +83,7 @@
         </div>
         <div class="login-footer">
             <p>&copy; 2025 PT Bank Pembangunan Daerah Sulawesi Selatan dan Sulawesi Barat</p>
-            <p>Divisi Corporate Secretary - CORSEC LENS v1.0.0</p>
+            <p>Divisi Corporate Secretary - CORSEC LENS v1.0.2</p>
         </div>
     </div>
 
@@ -171,7 +171,7 @@
             </nav>
 
             <div class="sidebar-footer">
-                <p>CORSEC LENS v1.0.0</p>
+                <p>CORSEC LENS v1.0.2</p>
                 <p>&copy; 2025 Bank Sulselbar</p>
             </div>
         </aside>
@@ -337,28 +337,36 @@
                                         <label for="jenisSurat">Jenis Surat <span class="required">*</span></label>
                                         <select id="jenisSurat" required onchange="updateNomorPreview()">
                                             <option value="">Pilih Jenis Surat</option>
-                                            <option value="Surat Keluar">Surat Keluar</option>
-                                            <option value="Memo Internal">Memo Internal</option>
-                                            <option value="Surat Keputusan">Surat Keputusan</option>
-                                            <option value="Surat Edaran">Surat Edaran</option>
-                                            <option value="Surat Undangan">Surat Undangan</option>
-                                            <option value="Surat Tugas">Surat Tugas</option>
-                                            <option value="Nota Dinas">Nota Dinas</option>
+                                            <option value="Surat Biasa">Surat Biasa (SR/B)</option>
+                                            <option value="Surat Rahasia">Surat Rahasia (SR/R)</option>
+                                            <option value="Surat Keputusan">Surat Keputusan (SK)</option>
+                                            <option value="Surat Edaran">Surat Edaran (SE)</option>
+                                            <option value="Memo Direksi">Memo Direksi (MM/DIR)</option>
+                                            <option value="Memo Corsec">Memo Corsec (MM/DCS)</option>
+                                            <option value="PKS">Perjanjian Kerjasama (PKS)</option>
+                                            <option value="MoU">MoU</option>
+                                            <option value="Notulen Radir">Notulen Radir</option>
+                                            <option value="Surat Tugas">Surat Tugas (ST)</option>
+                                            <option value="Surat Undangan">Surat Undangan (UND)</option>
+                                            <option value="Nota Dinas">Nota Dinas (ND)</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
                                         <label for="divisiSurat">Divisi Pengirim <span class="required">*</span></label>
                                         <select id="divisiSurat" required onchange="updateNomorPreview()">
                                             <option value="">Pilih Divisi</option>
-                                            <option value="Corporate Secretary" selected>Corporate Secretary</option>
-                                            <option value="Direktorat Kepatuhan">Direktorat Kepatuhan</option>
-                                            <option value="Divisi SDM">Divisi SDM</option>
-                                            <option value="Divisi Kredit">Divisi Kredit</option>
-                                            <option value="Divisi Dana">Divisi Dana</option>
-                                            <option value="Divisi Operasional">Divisi Operasional</option>
-                                            <option value="Divisi IT">Divisi IT</option>
-                                            <option value="Divisi Legal">Divisi Legal</option>
-                                            <option value="Divisi Umum">Divisi Umum</option>
+                                            <option value="Corporate Secretary" selected>Corporate Secretary (DCS)</option>
+                                            <option value="Direksi">Direksi (DIR)</option>
+                                            <option value="Divisi Human Capital">Divisi Human Capital (DHC)</option>
+                                            <option value="Divisi Jasa">Divisi Jasa (DJS)</option>
+                                            <option value="Divisi Dana & Layanan">Divisi Dana & Layanan (DDL)</option>
+                                            <option value="Divisi Retail & Kredit">Divisi Retail & Kredit (DRK)</option>
+                                            <option value="Divisi Kredit Korporasi">Divisi Kredit Korporasi (DKK)</option>
+                                            <option value="Divisi Kepatuhan">Divisi Kepatuhan (DKP)</option>
+                                            <option value="Divisi Internasional & Business">Divisi Internasional & Business (DIB)</option>
+                                            <option value="Divisi Umum">Divisi Umum (DUM)</option>
+                                            <option value="SIMO">SIMO</option>
+                                            <option value="Manajemen Risiko">Satuan Kerja Manajemen Risiko (SKMR)</option>
                                         </select>
                                     </div>
                                     <div class="form-group">
@@ -379,7 +387,7 @@
 
                                 <div class="nomor-preview">
                                     <label>Preview Nomor Surat:</label>
-                                    <div class="nomor-display" id="nomorPreview">-/---/---/--/----</div>
+                                    <div class="nomor-display" id="nomorPreview">SR/001/B/DCS/XII/25</div>
                                 </div>
                             </div>
 
@@ -447,11 +455,15 @@
                             </div>
                             <select id="filterJenis" onchange="filterSuratList()">
                                 <option value="">Semua Jenis</option>
-                                <option value="Surat Keluar">Surat Keluar</option>
-                                <option value="Memo Internal">Memo Internal</option>
+                                <option value="Surat Biasa">Surat Biasa</option>
+                                <option value="Surat Rahasia">Surat Rahasia</option>
                                 <option value="Surat Keputusan">Surat Keputusan</option>
                                 <option value="Surat Edaran">Surat Edaran</option>
-                                <option value="Surat Undangan">Surat Undangan</option>
+                                <option value="Memo Direksi">Memo Direksi</option>
+                                <option value="Memo Corsec">Memo Corsec</option>
+                                <option value="PKS">PKS</option>
+                                <option value="MoU">MoU</option>
+                                <option value="Notulen Radir">Notulen Radir</option>
                             </select>
                             <select id="filterStatus" onchange="filterSuratList()">
                                 <option value="">Semua Status</option>
@@ -686,9 +698,14 @@
                                     <label>Jenis Surat</label>
                                     <select id="reportJenis">
                                         <option value="">Semua Jenis</option>
-                                        <option value="Surat Keluar">Surat Keluar</option>
-                                        <option value="Memo Internal">Memo Internal</option>
+                                        <option value="Surat Biasa">Surat Biasa</option>
+                                        <option value="Surat Rahasia">Surat Rahasia</option>
                                         <option value="Surat Keputusan">Surat Keputusan</option>
+                                        <option value="Surat Edaran">Surat Edaran</option>
+                                        <option value="Memo Direksi">Memo Direksi</option>
+                                        <option value="Memo Corsec">Memo Corsec</option>
+                                        <option value="PKS">PKS</option>
+                                        <option value="MoU">MoU</option>
                                     </select>
                                 </div>
                                 <div class="form-group">
