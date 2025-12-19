@@ -147,10 +147,6 @@
 
                 <div class="nav-section">
                     <span class="nav-section-title">LAPORAN</span>
-                    <a href="#" class="nav-item" data-page="statistik" onclick="navigateTo('statistik')">
-                        <i class="fas fa-chart-bar"></i>
-                        <span>Statistik</span>
-                    </a>
                     <a href="#" class="nav-item" data-page="cetak-laporan" onclick="navigateTo('cetak-laporan')">
                         <i class="fas fa-print"></i>
                         <span>Cetak Laporan</span>
@@ -609,45 +605,6 @@
                     </div>
                 </div>
 
-                <!-- Statistik Page -->
-                <div class="page" id="statistikPage" style="display: none;">
-                    <div class="page-header">
-                        <h2><i class="fas fa-chart-bar"></i> Statistik</h2>
-                        <p>Analisis dan laporan penomoran surat</p>
-                    </div>
-
-                    <div class="stats-overview">
-                        <div class="stats-period">
-                            <label>Periode:</label>
-                            <select id="statsPeriod" onchange="updateStatistics()">
-                                <option value="week">Minggu Ini</option>
-                                <option value="month" selected>Bulan Ini</option>
-                                <option value="quarter">Kuartal Ini</option>
-                                <option value="year">Tahun Ini</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="chart-grid">
-                        <div class="chart-card">
-                            <h3>Surat per Jenis</h3>
-                            <canvas id="chartByType"></canvas>
-                        </div>
-                        <div class="chart-card">
-                            <h3>Tren Bulanan</h3>
-                            <canvas id="chartTrend"></canvas>
-                        </div>
-                        <div class="chart-card">
-                            <h3>Surat per Divisi</h3>
-                            <canvas id="chartByDivision"></canvas>
-                        </div>
-                        <div class="chart-card">
-                            <h3>Status Surat</h3>
-                            <canvas id="chartByStatus"></canvas>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Cetak Laporan Page -->
                 <div class="page" id="cetakLaporanPage" style="display: none;">
                     <div class="page-header">
@@ -671,13 +628,6 @@
                                     <div class="option-card">
                                         <i class="fas fa-book"></i>
                                         <span>Register Surat</span>
-                                    </div>
-                                </label>
-                                <label class="report-type-option">
-                                    <input type="radio" name="reportType" value="statistik">
-                                    <div class="option-card">
-                                        <i class="fas fa-chart-pie"></i>
-                                        <span>Statistik</span>
                                     </div>
                                 </label>
                             </div>
