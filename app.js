@@ -131,13 +131,9 @@ function cleanupResources() {
         autoSaveInterval = null;
     }
     
-    // Destroy all charts safely
+    // Destroy dashboard chart safely
     try {
         if (window.monthlyChart instanceof Chart) window.monthlyChart.destroy();
-        if (window.chartByType instanceof Chart) window.chartByType.destroy();
-        if (window.chartTrend instanceof Chart) window.chartTrend.destroy();
-        if (window.chartByDivision instanceof Chart) window.chartByDivision.destroy();
-        if (window.chartByStatus instanceof Chart) window.chartByStatus.destroy();
     } catch(e) {
         console.warn('Chart cleanup error:', e);
     }
@@ -419,7 +415,6 @@ function navigateTo(pageName) {
         'upload-dokumen': 'uploadDokumenPage',
         'arsip-dokumen': 'arsipDokumenPage',
         'folder-manager': 'folderManagerPage',
-        'statistik': 'statistikPage',
         'cetak-laporan': 'cetakLaporanPage',
         'pengaturan': 'pengaturanPage'
     };
@@ -439,7 +434,6 @@ function navigateTo(pageName) {
         'upload-dokumen': 'Upload Dokumen',
         'arsip-dokumen': 'Arsip Dokumen',
         'folder-manager': 'Manajemen Folder',
-        'statistik': 'Statistik',
         'cetak-laporan': 'Cetak Laporan',
         'pengaturan': 'Pengaturan'
     };
@@ -465,10 +459,6 @@ function navigateTo(pageName) {
             break;
         case 'folder-manager':
             renderFolderTree();
-            break;
-        case 'statistik':
-            // BUG FIX: Track timeout untuk bisa di-cancel
-            chartTimeouts.statistik = setTimeout(initStatisticsCharts, 100);
             break;
         case 'buat-surat':
             initializeDateInputs();
@@ -1363,69 +1353,6 @@ function openFolder(folderId, type, evt) {
     html += '</div>';
     folderContent.innerHTML = html;
 }
-
-// ========================================
-// STATISTICS
-// ========================================
-
-function initStatisticsCharts() {
-    if (typeof Chart === 'undefined') return;
-    
-    // Chart By Type (Doughnut)
-    var ctxType = document.getElementById('chartByType');
-    if (ctxType) {
-        window.chartByType = destroyChart(window.chartByType, ctxType);
-        var typeData = {};
-        suratData.forEach(function(s) { typeData[s.jenis] = (typeData[s.jenis] || 0) + 1; });
-        window.chartByType = new Chart(ctxType, {
-            type: 'doughnut',
-            data: { labels: Object.keys(typeData), datasets: [{ data: Object.values(typeData), backgroundColor: ['#1B5E9E', '#8BC34A', '#FF9800', '#E53935', '#7B1FA2', '#00BCD4', '#795548'] }] },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-        });
-    }
-    
-    // Chart Trend (Bar - Bulanan)
-    var ctxTrend = document.getElementById('chartTrend');
-    if (ctxTrend) {
-        window.chartTrend = destroyChart(window.chartTrend, ctxTrend);
-        window.chartTrend = new Chart(ctxTrend, {
-            type: 'bar',
-            data: { labels: ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'], datasets: [{ label: 'Surat', data: getMonthlyData(), backgroundColor: '#1B5E9E' }] },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
-    }
-    
-    // Chart By Division (Pie)
-    var ctxDiv = document.getElementById('chartByDivision');
-    if (ctxDiv) {
-        window.chartByDivision = destroyChart(window.chartByDivision, ctxDiv);
-        var divData = {};
-        suratData.forEach(function(s) { divData[s.divisi] = (divData[s.divisi] || 0) + 1; });
-        window.chartByDivision = new Chart(ctxDiv, {
-            type: 'pie',
-            data: { labels: Object.keys(divData), datasets: [{ data: Object.values(divData), backgroundColor: ['#8BC34A', '#1B5E9E', '#FF9800', '#E53935', '#7B1FA2'] }] },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-        });
-    }
-    
-    // Chart By Status (Doughnut)
-    var ctxStatus = document.getElementById('chartByStatus');
-    if (ctxStatus) {
-        window.chartByStatus = destroyChart(window.chartByStatus, ctxStatus);
-        var statusData = {
-            'Selesai': suratData.filter(function(s) { return s.status === 'Selesai'; }).length,
-            'Proses': suratData.filter(function(s) { return s.status === 'Proses'; }).length,
-            'Draft': suratData.filter(function(s) { return s.status === 'Draft'; }).length
-        };
-        window.chartByStatus = new Chart(ctxStatus, {
-            type: 'doughnut',
-            data: { labels: Object.keys(statusData), datasets: [{ data: Object.values(statusData), backgroundColor: ['#4CAF50', '#2196F3', '#FFC107'] }] },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-        });
-    }
-}
-
-function updateStatistics() { initStatisticsCharts(); }
 
 // ========================================
 // REPORTS & SETTINGS
