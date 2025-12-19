@@ -580,10 +580,20 @@ function initCharts() {
     var canvas = document.getElementById('monthlyChart');
     if (!canvas || typeof Chart === 'undefined') return;
     
-    // Destroy dan clear canvas
-    window.monthlyChart = destroyChart(window.monthlyChart, canvas);
+    // Destroy chart lama
+    if (window.monthlyChart instanceof Chart) {
+        window.monthlyChart.destroy();
+        window.monthlyChart = null;
+    }
     
-    window.monthlyChart = new Chart(canvas, {
+    // RESET: Ganti canvas dengan yang baru untuk reset ukuran
+    var parent = canvas.parentNode;
+    var newCanvas = document.createElement('canvas');
+    newCanvas.id = 'monthlyChart';
+    parent.innerHTML = '';  // Clear parent
+    parent.appendChild(newCanvas);
+    
+    window.monthlyChart = new Chart(newCanvas, {
         type: 'line',
         data: {
             labels: ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'],
