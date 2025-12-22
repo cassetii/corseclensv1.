@@ -11,7 +11,7 @@ const SUPABASE_URL = 'https://adjpfbvvsinoyxddxahr.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_p_XTy6AgFwl5DIPgRk7pug_GKfnXUaQ';
 const STORAGE_BUCKET = 'corsec-files';
 
-let supabase = null;
+let supabaseClient = null;
 let supabaseReady = false;
 
 function initSupabase() {
@@ -21,7 +21,7 @@ function initSupabase() {
     }
     
     try {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         supabaseReady = true;
         console.log('✅ Supabase initialized');
         return true;
@@ -230,13 +230,13 @@ async function uploadFileToSupabase(file, customPath) {
         
         console.log('Uploading to:', path);
         
-        const { data, error } = await supabase.storage
+        const { data, error } = await supabaseClient.storage
             .from(STORAGE_BUCKET)
             .upload(path, file);
         
         if (error) throw error;
         
-        const { data: urlData } = supabase.storage
+        const { data: urlData } = supabaseClient.storage
             .from(STORAGE_BUCKET)
             .getPublicUrl(path);
         
@@ -260,7 +260,7 @@ async function deleteFileFromSupabase(path) {
     if (!supabaseReady) return { success: false };
     
     try {
-        const { error } = await supabase.storage
+        const { error } = await supabaseClient.storage
             .from(STORAGE_BUCKET)
             .remove([path]);
         
