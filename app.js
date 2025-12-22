@@ -1,57 +1,33 @@
 /**
  * CORSEC LENS - Aplikasi Penomoran Naskah Dinas
  * PT Bank Sulselbar - Divisi Corporate Secretary
- * Version 2.0.1 - Firebase Integration (Fixed)
- * 
- * PERBAIKAN:
- * - Fix double upload dengan flag isUploading
- * - Fix data tidak tampil dengan load manual
- * - Fix jumlah 0 dengan load data saat login
+ * Version 3.0.0 - Supabase Integration
  */
 
 // ========================================
-// FIREBASE CONFIGURATION
+// SUPABASE CONFIGURATION
 // ========================================
-const firebaseConfig = {
-    apiKey: "AIzaSyBI5T3ZVyHXSRFikTjSlnW9P04cO1UDAwg",
-    authDomain: "databasebesar.firebaseapp.com",
-    projectId: "databasebesar",
-    storageBucket: "databasebesar.firebasestorage.app",
-    messagingSenderId: "253231829334",
-    appId: "1:253231829334:web:d1c0a458aab2f521c546f7",
-    measurementId: "G-9CT0LE4FHQ"
-};
+const SUPABASE_URL = 'https://adjpfbvvsinoyxddxahr.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_p_XTy6AgFwl5DIPgRk7pug_GKfnXUaQ';
+const STORAGE_BUCKET = 'corsec-files';
 
-// CORSEC LENS menggunakan folder terpisah agar tidak mengganggu data lain
-const CORSEC_STORAGE_PATH = 'corsec_lens';
-const CORSEC_COLLECTION = 'corsec_lens';
+let supabase = null;
+let supabaseReady = false;
 
-// Initialize Firebase
-let app, db, storage, auth;
-let firebaseReady = false;
-
-function initFirebase() {
-    if (typeof firebase === 'undefined') {
-        console.warn('Firebase SDK not loaded - running in offline mode');
-        firebaseReady = false;
-        return;
+function initSupabase() {
+    if (typeof window.supabase === 'undefined') {
+        console.error('Supabase SDK not loaded!');
+        return false;
     }
     
     try {
-        if (firebase.apps && firebase.apps.length > 0) {
-            app = firebase.apps[0];
-        } else {
-            app = firebase.initializeApp(firebaseConfig);
-        }
-        
-        db = firebase.firestore();
-        storage = firebase.storage();
-        auth = firebase.auth();
-        firebaseReady = true;
-        console.log('✅ Firebase initialized successfully');
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        supabaseReady = true;
+        console.log('✅ Supabase initialized');
+        return true;
     } catch (error) {
-        console.error('Firebase init error:', error);
-        firebaseReady = false;
+        console.error('Supabase init error:', error);
+        return false;
     }
 }
 
@@ -64,79 +40,29 @@ let dokumenData = [];
 let nomorCounters = {};
 let uploadedFiles = [];
 
-// BUG FIX: Track timeouts dan intervals
 let chartTimeouts = {};
 let counterIntervals = {};
-let uploadIntervals = [];
-let autoSaveInterval = null;
 let dragDropInitialized = false;
-
-// FIX: Flag untuk mencegah double upload
 let isUploading = false;
 let isLoadingData = false;
 
-// Unsubscribe functions untuk realtime listeners
-let unsubscribeSurat = null;
-let unsubscribeDokumen = null;
-
 // ========================================
-// FIREBASE - AUTHENTICATION
+// SUPABASE - LOAD DATA
 // ========================================
-async function firebaseLogin(email, password) {
-    if (!firebaseReady) {
-        return { success: false, error: 'Firebase not initialized' };
-    }
+async function loadSuratFromSupabase() {
+    if (!supabaseReady) return [];
     
     try {
-        const userCredential = await auth.signInWithEmailAndPassword(email, password);
-        const user = userCredential.user;
+        console.log('Loading surat from Supabase...');
+        const { data, error } = await supabase
+            .from('surat')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(100);
         
-        const userDoc = await db.collection('users').doc(user.uid).get();
+        if (error) throw error;
         
-        if (userDoc.exists) {
-            return {
-                success: true,
-                user: { uid: user.uid, email: user.email, ...userDoc.data() }
-            };
-        }
-        
-        return { success: true, user: { uid: user.uid, email: user.email, name: email.split('@')[0] } };
-    } catch (error) {
-        console.error('Login error:', error);
-        return { success: false, error: error.message };
-    }
-}
-
-async function firebaseLogout() {
-    try {
-        if (unsubscribeSurat) unsubscribeSurat();
-        if (unsubscribeDokumen) unsubscribeDokumen();
-        
-        await auth.signOut();
-        return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-}
-
-// ========================================
-// FIREBASE - LOAD DATA (MANUAL - FIX untuk data tidak tampil)
-// ========================================
-async function loadSuratFromFirebase() {
-    if (!firebaseReady || isLoadingData) return;
-    
-    try {
-        console.log('Loading surat from Firebase...');
-        const snapshot = await db.collection(CORSEC_COLLECTION).doc('data').collection('surat')
-            .orderBy('createdAt', 'desc')
-            .limit(100)
-            .get();
-        
-        suratData = [];
-        snapshot.forEach(doc => {
-            suratData.push({ id: doc.id, ...doc.data() });
-        });
-        
+        suratData = data || [];
         console.log('✅ Loaded', suratData.length, 'surat');
         return suratData;
     } catch (error) {
@@ -145,21 +71,20 @@ async function loadSuratFromFirebase() {
     }
 }
 
-async function loadDokumenFromFirebase() {
-    if (!firebaseReady) return;
+async function loadDokumenFromSupabase() {
+    if (!supabaseReady) return [];
     
     try {
-        console.log('Loading dokumen from Firebase...');
-        const snapshot = await db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen')
-            .orderBy('createdAt', 'desc')
-            .limit(100)
-            .get();
+        console.log('Loading dokumen from Supabase...');
+        const { data, error } = await supabase
+            .from('dokumen')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(100);
         
-        dokumenData = [];
-        snapshot.forEach(doc => {
-            dokumenData.push({ id: doc.id, ...doc.data() });
-        });
+        if (error) throw error;
         
+        dokumenData = data || [];
         console.log('✅ Loaded', dokumenData.length, 'dokumen');
         return dokumenData;
     } catch (error) {
@@ -168,63 +93,72 @@ async function loadDokumenFromFirebase() {
     }
 }
 
-async function loadCountersFromFirebase() {
-    if (!firebaseReady) return;
+async function loadCountersFromSupabase() {
+    if (!supabaseReady) return;
     
     try {
-        const doc = await db.collection(CORSEC_COLLECTION).doc('counters').get();
-        if (doc.exists) {
-            nomorCounters = doc.data();
-            console.log('✅ Loaded counters:', nomorCounters);
-        }
+        const { data, error } = await supabase
+            .from('counters')
+            .select('*');
+        
+        if (error) throw error;
+        
+        nomorCounters = {};
+        (data || []).forEach(row => {
+            nomorCounters[row.id] = row.value;
+        });
+        console.log('✅ Loaded counters');
     } catch (error) {
         console.error('Load counters error:', error);
     }
 }
 
 // ========================================
-// FIREBASE - SURAT OPERATIONS
+// SUPABASE - SURAT OPERATIONS
 // ========================================
-async function saveSuratToFirebase(suratObj) {
-    if (!firebaseReady) {
-        console.warn('Firebase not ready, saving to localStorage');
-        return saveToLocalStorage(suratObj);
+async function saveSuratToSupabase(suratObj) {
+    if (!supabaseReady) {
+        return { success: false, error: 'Supabase not ready' };
     }
     
     try {
-        const docRef = await db.collection(CORSEC_COLLECTION).doc('data').collection('surat').add({
-            ...suratObj,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        const { data, error } = await supabase
+            .from('surat')
+            .insert([{
+                nomor: suratObj.nomor,
+                jenis: suratObj.jenis,
+                divisi: suratObj.divisi,
+                sifat: suratObj.sifat,
+                tanggal: suratObj.tanggal,
+                kepada: suratObj.kepada,
+                perihal: suratObj.perihal,
+                lampiran: suratObj.lampiran,
+                tembusan: suratObj.tembusan,
+                status: suratObj.status || 'Draft',
+                files: suratObj.files || [],
+                created_by: suratObj.createdBy
+            }])
+            .select();
         
-        return { success: true, id: docRef.id };
+        if (error) throw error;
+        
+        return { success: true, id: data[0].id, data: data[0] };
     } catch (error) {
         console.error('Save surat error:', error);
         return { success: false, error: error.message };
     }
 }
 
-async function updateSuratInFirebase(suratId, updateData) {
-    if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
+async function deleteSuratFromSupabase(suratId) {
+    if (!supabaseReady) return { success: false };
     
     try {
-        await db.collection(CORSEC_COLLECTION).doc('data').collection('surat').doc(suratId).update({
-            ...updateData,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        return { success: true };
-    } catch (error) {
-        console.error('Update surat error:', error);
-        return { success: false, error: error.message };
-    }
-}
-
-async function deleteSuratFromFirebase(suratId) {
-    if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
-    
-    try {
-        await db.collection(CORSEC_COLLECTION).doc('data').collection('surat').doc(suratId).delete();
+        const { error } = await supabase
+            .from('surat')
+            .delete()
+            .eq('id', suratId);
+        
+        if (error) throw error;
         return { success: true };
     } catch (error) {
         console.error('Delete surat error:', error);
@@ -232,48 +166,28 @@ async function deleteSuratFromFirebase(suratId) {
     }
 }
 
-// Realtime listener untuk surat (backup - data utama dari load manual)
-function listenToSurat() {
-    if (!firebaseReady) return;
-    
-    try {
-        unsubscribeSurat = db.collection(CORSEC_COLLECTION).doc('data').collection('surat')
-            .orderBy('createdAt', 'desc')
-            .onSnapshot((snapshot) => {
-                suratData = [];
-                snapshot.forEach(doc => {
-                    suratData.push({ id: doc.id, ...doc.data() });
-                });
-                
-                console.log('Realtime update: ', suratData.length, 'surat');
-                
-                if (document.getElementById('suratTableBody')) {
-                    renderSuratTable();
-                }
-                updateDashboardStats();
-                renderActivityList();
-            }, (error) => {
-                console.error('Listen surat error:', error);
-            });
-    } catch (e) {
-        console.warn('Listen surat failed:', e);
-    }
-}
-
 // ========================================
-// FIREBASE - COUNTER OPERATIONS
+// SUPABASE - COUNTER OPERATIONS
 // ========================================
 async function getNomorCounter(jenisSurat) {
-    if (!firebaseReady) return nomorCounters[jenisSurat] || 0;
+    if (nomorCounters[jenisSurat] !== undefined) {
+        return nomorCounters[jenisSurat];
+    }
+    
+    if (!supabaseReady) return 0;
     
     try {
-        const counterRef = db.collection(CORSEC_COLLECTION).doc('counters');
-        const doc = await counterRef.get();
+        const { data, error } = await supabase
+            .from('counters')
+            .select('value')
+            .eq('id', jenisSurat)
+            .single();
         
-        if (doc.exists && doc.data()[jenisSurat]) {
-            return doc.data()[jenisSurat];
-        }
-        return 0;
+        if (error && error.code !== 'PGRST116') throw error;
+        
+        const value = data ? data.value : 0;
+        nomorCounters[jenisSurat] = value;
+        return value;
     } catch (error) {
         console.error('Get counter error:', error);
         return nomorCounters[jenisSurat] || 0;
@@ -281,53 +195,56 @@ async function getNomorCounter(jenisSurat) {
 }
 
 async function incrementNomorCounter(jenisSurat) {
-    // Update local immediately
     nomorCounters[jenisSurat] = (nomorCounters[jenisSurat] || 0) + 1;
     
-    if (!firebaseReady) {
-        return { success: true };
-    }
+    if (!supabaseReady) return { success: true };
     
     try {
-        const counterRef = db.collection(CORSEC_COLLECTION).doc('counters');
+        const { error } = await supabase
+            .from('counters')
+            .upsert({ 
+                id: jenisSurat, 
+                value: nomorCounters[jenisSurat] 
+            });
         
-        await db.runTransaction(async (transaction) => {
-            const doc = await transaction.get(counterRef);
-            
-            if (!doc.exists) {
-                transaction.set(counterRef, { [jenisSurat]: 1 });
-            } else {
-                const currentValue = doc.data()[jenisSurat] || 0;
-                transaction.update(counterRef, { [jenisSurat]: currentValue + 1 });
-            }
-        });
-        
+        if (error) throw error;
         return { success: true };
     } catch (error) {
         console.error('Increment counter error:', error);
-        return { success: true }; // Return success karena local sudah di-update
+        return { success: true };
     }
 }
 
 // ========================================
-// FIREBASE - STORAGE (FILE UPLOAD)
+// SUPABASE - STORAGE (FILE UPLOAD)
 // ========================================
-async function uploadFileToStorage(file, customPath) {
-    if (!firebaseReady) {
-        return { success: false, error: 'Firebase not ready' };
+async function uploadFileToSupabase(file, customPath) {
+    if (!supabaseReady) {
+        return { success: false, error: 'Supabase not ready' };
     }
     
     try {
-        const storageRef = storage.ref();
-        const path = CORSEC_STORAGE_PATH + '/' + customPath;
-        const fileRef = storageRef.child(path);
+        const timestamp = Date.now();
+        const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+        const path = customPath + '/' + timestamp + '_' + safeName;
         
-        const snapshot = await fileRef.put(file);
-        const downloadURL = await snapshot.ref.getDownloadURL();
+        console.log('Uploading to:', path);
+        
+        const { data, error } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .upload(path, file);
+        
+        if (error) throw error;
+        
+        const { data: urlData } = supabase.storage
+            .from(STORAGE_BUCKET)
+            .getPublicUrl(path);
+        
+        console.log('✅ Upload success:', path);
         
         return {
             success: true,
-            url: downloadURL,
+            url: urlData.publicUrl,
             path: path,
             name: file.name,
             size: file.size,
@@ -339,146 +256,74 @@ async function uploadFileToStorage(file, customPath) {
     }
 }
 
-function uploadFileWithProgress(file, customPath, onProgress) {
-    return new Promise((resolve, reject) => {
-        if (!firebaseReady) {
-            reject({ success: false, error: 'Firebase not ready' });
-            return;
-        }
-        
-        const storageRef = storage.ref();
-        const path = CORSEC_STORAGE_PATH + '/' + customPath;
-        const fileRef = storageRef.child(path);
-        const uploadTask = fileRef.put(file);
-        
-        uploadTask.on('state_changed',
-            (snapshot) => {
-                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                if (onProgress) onProgress(progress);
-            },
-            (error) => {
-                reject({ success: false, error: error.message });
-            },
-            async () => {
-                const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
-                resolve({
-                    success: true,
-                    url: downloadURL,
-                    path: path,
-                    name: file.name,
-                    size: file.size,
-                    type: file.type
-                });
-            }
-        );
-    });
-}
-
-async function deleteFileFromStorage(path) {
-    if (!firebaseReady) return { success: false };
+async function deleteFileFromSupabase(path) {
+    if (!supabaseReady) return { success: false };
     
     try {
-        const storageRef = storage.ref();
-        const fileRef = storageRef.child(path);
-        await fileRef.delete();
+        const { error } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .remove([path]);
+        
+        if (error) throw error;
         return { success: true };
     } catch (error) {
         console.error('Delete file error:', error);
-        return { success: false, error: error.message };
+        return { success: false };
     }
 }
 
 // ========================================
-// FIREBASE - DOKUMEN OPERATIONS
+// SUPABASE - DOKUMEN OPERATIONS
 // ========================================
-async function saveDokumenToFirebase(dokumenObj) {
-    if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
+async function saveDokumenToSupabase(dokumenObj) {
+    if (!supabaseReady) return { success: false };
     
     try {
-        const docRef = await db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen').add({
-            ...dokumenObj,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        const { data, error } = await supabase
+            .from('dokumen')
+            .insert([{
+                name: dokumenObj.name,
+                size: dokumenObj.size,
+                type: dokumenObj.type,
+                url: dokumenObj.url,
+                path: dokumenObj.path,
+                kategori: dokumenObj.kategori,
+                keterangan: dokumenObj.keterangan,
+                uploaded_by: dokumenObj.uploadedBy
+            }])
+            .select();
         
-        return { success: true, id: docRef.id };
+        if (error) throw error;
+        return { success: true, id: data[0].id, data: data[0] };
     } catch (error) {
         console.error('Save dokumen error:', error);
         return { success: false, error: error.message };
     }
 }
 
-async function deleteDokumenFromFirebase(dokumenId, filePath) {
-    if (!firebaseReady) return { success: false };
+async function deleteDokumenFromSupabase(dokumenId, filePath) {
+    if (!supabaseReady) return { success: false };
     
     try {
         if (filePath) {
-            await deleteFileFromStorage(filePath);
+            await deleteFileFromSupabase(filePath);
         }
         
-        await db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen').doc(dokumenId).delete();
+        const { error } = await supabase
+            .from('dokumen')
+            .delete()
+            .eq('id', dokumenId);
         
+        if (error) throw error;
         return { success: true };
     } catch (error) {
         console.error('Delete dokumen error:', error);
-        return { success: false, error: error.message };
-    }
-}
-
-// Realtime listener untuk dokumen
-function listenToDokumen() {
-    if (!firebaseReady) return;
-    
-    try {
-        unsubscribeDokumen = db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen')
-            .orderBy('createdAt', 'desc')
-            .onSnapshot((snapshot) => {
-                dokumenData = [];
-                snapshot.forEach(doc => {
-                    dokumenData.push({ id: doc.id, ...doc.data() });
-                });
-                
-                console.log('Realtime update:', dokumenData.length, 'dokumen');
-                
-                if (document.getElementById('dokumenGrid')) {
-                    renderDokumenGrid();
-                }
-                updateDashboardStats();
-            }, (error) => {
-                console.error('Listen dokumen error:', error);
-            });
-    } catch (e) {
-        console.warn('Listen dokumen failed:', e);
+        return { success: false };
     }
 }
 
 // ========================================
-// LOCAL STORAGE FALLBACK
-// ========================================
-function saveToLocalStorage(data) {
-    suratData.push(data);
-    localStorage.setItem('corsecSuratData', JSON.stringify(suratData));
-    return { success: true, id: data.id };
-}
-
-function loadFromLocalStorage() {
-    const savedSurat = localStorage.getItem('corsecSuratData');
-    if (savedSurat) {
-        suratData = JSON.parse(savedSurat);
-    }
-    
-    const savedDokumen = localStorage.getItem('corsecDokumenData');
-    if (savedDokumen) {
-        dokumenData = JSON.parse(savedDokumen);
-    }
-    
-    const savedCounters = localStorage.getItem('corsecNomorCounters');
-    if (savedCounters) {
-        nomorCounters = JSON.parse(savedCounters);
-    }
-}
-
-// ========================================
-// CLEANUP RESOURCES
+// CLEANUP
 // ========================================
 function cleanupResources() {
     Object.values(chartTimeouts).forEach(clearTimeout);
@@ -486,14 +331,6 @@ function cleanupResources() {
     
     Object.values(counterIntervals).forEach(clearInterval);
     counterIntervals = {};
-    
-    uploadIntervals.forEach(clearInterval);
-    uploadIntervals = [];
-    
-    if (autoSaveInterval) {
-        clearInterval(autoSaveInterval);
-        autoSaveInterval = null;
-    }
     
     try {
         if (window.monthlyChart instanceof Chart) window.monthlyChart.destroy();
@@ -504,8 +341,7 @@ function cleanupResources() {
 // INITIALIZE APPLICATION
 // ========================================
 document.addEventListener('DOMContentLoaded', function() {
-    initFirebase();
-    loadFromLocalStorage();
+    initSupabase();
     
     const session = localStorage.getItem('corsecSession');
     if (session) {
@@ -514,7 +350,16 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     setupEventListeners();
+    updateCurrentDate();
 });
+
+function updateCurrentDate() {
+    var dateEl = document.getElementById('currentDate');
+    if (dateEl) {
+        var options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        dateEl.textContent = new Date().toLocaleDateString('id-ID', options);
+    }
+}
 
 function setupEventListeners() {
     var loginForm = document.getElementById('loginForm');
@@ -525,11 +370,6 @@ function setupEventListeners() {
     var suratForm = document.getElementById('suratForm');
     if (suratForm) {
         suratForm.addEventListener('submit', handleCreateSurat);
-    }
-    
-    var logoutBtn = document.getElementById('logoutBtn');
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
     }
     
     window.addEventListener('beforeunload', cleanupResources);
@@ -589,32 +429,6 @@ async function handleLogin(event) {
         return;
     }
     
-    if (firebaseReady) {
-        try {
-            var email = username.includes('@') ? username : username + '@banksulselbar.co.id';
-            var result = await firebaseLogin(email, password);
-            
-            if (result.success) {
-                currentUser = result.user;
-                
-                if (remember) {
-                    localStorage.setItem('corsecSession', JSON.stringify(currentUser));
-                }
-                
-                showToast('success', 'Login Berhasil', 'Selamat datang, ' + (currentUser.name || username));
-                await showMainApp();
-                
-                if (loginBtn) {
-                    loginBtn.innerHTML = originalText;
-                    loginBtn.disabled = false;
-                }
-                return;
-            }
-        } catch (e) {
-            console.error('Firebase login error:', e);
-        }
-    }
-    
     showToast('error', 'Login Gagal', 'Username atau password salah');
     
     if (loginBtn) {
@@ -625,10 +439,6 @@ async function handleLogin(event) {
 
 async function handleLogout() {
     cleanupResources();
-    
-    if (firebaseReady) {
-        await firebaseLogout();
-    }
     
     localStorage.removeItem('corsecSession');
     currentUser = null;
@@ -652,43 +462,55 @@ async function showMainApp() {
         return;
     }
     
-    if (loginPage) {
-        loginPage.style.display = 'none';
-    }
-    
+    if (loginPage) loginPage.style.display = 'none';
     mainApp.style.display = 'flex';
     
+    // Update user info
     var userName = document.getElementById('userDisplayName');
     var userRole = document.getElementById('userRole');
+    var headerUserName = document.getElementById('headerUserName');
+    var welcomeName = document.getElementById('welcomeName');
+    
     if (userName) userName.textContent = currentUser.name || currentUser.username || 'User';
     if (userRole) userRole.textContent = currentUser.role || 'Staff';
+    if (headerUserName) headerUserName.textContent = (currentUser.name || '').split(' ')[0];
+    if (welcomeName) welcomeName.textContent = (currentUser.name || '').split(' ')[0];
     
-    // FIX: Load data dari Firebase SEBELUM navigasi
-    if (firebaseReady) {
+    // Load data dari Supabase
+    if (supabaseReady) {
         isLoadingData = true;
         showToast('info', 'Loading', 'Mengambil data...');
         
         try {
-            await loadSuratFromFirebase();
-            await loadDokumenFromFirebase();
-            await loadCountersFromFirebase();
-            
-            // Start realtime listeners sebagai backup
-            listenToSurat();
-            listenToDokumen();
-            
+            await loadSuratFromSupabase();
+            await loadDokumenFromSupabase();
+            await loadCountersFromSupabase();
             console.log('✅ Data loaded:', suratData.length, 'surat,', dokumenData.length, 'dokumen');
+            showToast('success', 'Ready', 'Data berhasil dimuat');
         } catch (e) {
             console.error('Load data error:', e);
         }
         
         isLoadingData = false;
-    } else if (suratData.length === 0) {
-        loadSampleData();
     }
     
     navigateTo('dashboard');
     setupDragAndDrop();
+}
+
+function togglePassword() {
+    var passwordInput = document.getElementById('password');
+    var eyeIcon = document.getElementById('eyeIcon');
+    
+    if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        eyeIcon.classList.remove('fa-eye');
+        eyeIcon.classList.add('fa-eye-slash');
+    } else {
+        passwordInput.type = 'password';
+        eyeIcon.classList.remove('fa-eye-slash');
+        eyeIcon.classList.add('fa-eye');
+    }
 }
 
 // ========================================
@@ -697,11 +519,6 @@ async function showMainApp() {
 function navigateTo(pageName) {
     Object.values(chartTimeouts).forEach(clearTimeout);
     chartTimeouts = {};
-    
-    if (pageName !== 'upload-dokumen') {
-        uploadIntervals.forEach(clearInterval);
-        uploadIntervals = [];
-    }
     
     var pageMap = {
         'dashboard': 'dashboardPage',
@@ -730,21 +547,17 @@ function navigateTo(pageName) {
     });
     
     var targetPage = document.getElementById(pageMap[pageName]);
-    if (targetPage) {
-        targetPage.style.display = 'block';
-    }
+    if (targetPage) targetPage.style.display = 'block';
     
     document.querySelectorAll('.nav-item').forEach(function(item) {
         item.classList.remove('active');
-        if (item.dataset.page === pageName) {
-            item.classList.add('active');
-        }
+        if (item.dataset.page === pageName) item.classList.add('active');
     });
     
     var pageTitle = document.getElementById('pageTitle');
-    if (pageTitle) {
-        pageTitle.textContent = titleMap[pageName] || 'CORSEC LENS';
-    }
+    var breadcrumbCurrent = document.getElementById('breadcrumbCurrent');
+    if (pageTitle) pageTitle.textContent = titleMap[pageName] || 'CORSEC LENS';
+    if (breadcrumbCurrent) breadcrumbCurrent.textContent = titleMap[pageName] || 'Dashboard';
     
     switch(pageName) {
         case 'dashboard':
@@ -778,19 +591,39 @@ function toggleSidebar() {
     if (sidebar) sidebar.classList.toggle('active');
 }
 
+function toggleNotifications() {
+    showToast('info', 'Notifikasi', 'Tidak ada notifikasi baru');
+}
+
+function handleGlobalSearch(event) {
+    if (event.key === 'Enter') {
+        var query = event.target.value.toLowerCase();
+        if (query) {
+            showToast('info', 'Mencari...', 'Mencari: ' + query);
+        }
+    }
+}
+
 // ========================================
 // DASHBOARD
 // ========================================
 function updateDashboardStats() {
-    var totalSurat = suratData.length;
-    var selesai = suratData.filter(function(s) { return s.status === 'Selesai'; }).length;
-    var proses = suratData.filter(function(s) { return s.status === 'Proses' || s.status === 'Draft'; }).length;
-    var totalDokumen = dokumenData.length;
+    var totalSuratCount = suratData.length;
+    var selesaiCount = suratData.filter(function(s) { return s.status === 'Selesai'; }).length;
+    var prosesCount = suratData.filter(function(s) { return s.status === 'Proses' || s.status === 'Draft'; }).length;
+    var totalDokumenCount = dokumenData.length;
     
-    animateCounter('statTotalSurat', totalSurat);
-    animateCounter('statSelesai', selesai);
-    animateCounter('statProses', proses);
-    animateCounter('statDokumen', totalDokumen);
+    // Update dengan ID yang benar sesuai HTML
+    animateCounter('totalSurat', totalSuratCount);
+    animateCounter('suratSelesai', selesaiCount);
+    animateCounter('suratProses', prosesCount);
+    animateCounter('totalDokumen', totalDokumenCount);
+    
+    // Update sidebar badges
+    var suratCountEl = document.getElementById('suratCount');
+    var arsipCountEl = document.getElementById('arsipCount');
+    if (suratCountEl) suratCountEl.textContent = totalSuratCount;
+    if (arsipCountEl) arsipCountEl.textContent = totalDokumenCount;
 }
 
 function animateCounter(elementId, target) {
@@ -967,17 +800,8 @@ async function generateNomorSurat(jenis, divisi) {
 
 function initializeDateInputs() {
     var today = new Date().toISOString().split('T')[0];
-    
     var tanggalSurat = document.getElementById('tanggalSurat');
     if (tanggalSurat) tanggalSurat.value = today;
-    
-    var reportDateFrom = document.getElementById('reportDateFrom');
-    var reportDateTo = document.getElementById('reportDateTo');
-    if (reportDateFrom && reportDateTo) {
-        var firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-        reportDateFrom.value = firstDay.toISOString().split('T')[0];
-        reportDateTo.value = today;
-    }
 }
 
 async function updateNomorPreview() {
@@ -1026,8 +850,8 @@ async function handleCreateSurat(event) {
         var fileUrls = [];
         if (uploadedFiles.length > 0) {
             for (var file of uploadedFiles) {
-                var path = 'surat/' + nomor.replace(/\//g, '-') + '/' + Date.now() + '_' + file.name;
-                var uploadResult = await uploadFileToStorage(file, path);
+                var path = 'surat/' + nomor.replace(/\//g, '-');
+                var uploadResult = await uploadFileToSupabase(file, path);
                 if (uploadResult.success) {
                     fileUrls.push({
                         name: file.name,
@@ -1055,13 +879,12 @@ async function handleCreateSurat(event) {
             createdBy: currentUser ? (currentUser.name || currentUser.username) : 'User'
         };
         
-        var result = await saveSuratToFirebase(newSurat);
+        var result = await saveSuratToSupabase(newSurat);
         
         if (result.success) {
             await incrementNomorCounter(jenis);
             
-            // FIX: Tambahkan ke local array juga
-            suratData.unshift({ id: result.id, ...newSurat, createdAt: new Date() });
+            suratData.unshift(result.data);
             
             showToast('success', 'Berhasil', 'Surat ' + nomor + ' berhasil dibuat');
             
@@ -1084,6 +907,20 @@ async function handleCreateSurat(event) {
     
     submitBtn.innerHTML = originalText;
     submitBtn.disabled = false;
+}
+
+function resetForm() {
+    document.getElementById('suratForm').reset();
+    uploadedFiles = [];
+    var fileList = document.getElementById('fileList');
+    if (fileList) fileList.innerHTML = '';
+    initializeDateInputs();
+    updateNomorPreview();
+    showToast('info', 'Reset', 'Form telah direset');
+}
+
+function saveDraft() {
+    showToast('info', 'Draft', 'Fitur draft akan segera tersedia');
 }
 
 // ========================================
@@ -1111,7 +948,7 @@ function renderSuratTable() {
     });
     
     if (filtered.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="7" class="empty-table"><i class="fas fa-inbox"></i><p>Tidak ada data surat</p></td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="8" class="empty-table"><i class="fas fa-inbox"></i><p>Tidak ada data surat</p></td></tr>';
         return;
     }
     
@@ -1123,7 +960,8 @@ function renderSuratTable() {
         html += '<td><strong>' + surat.nomor + '</strong></td>';
         html += '<td>' + (surat.tanggal || '-') + '</td>';
         html += '<td>' + (surat.jenis || '-') + '</td>';
-        html += '<td>' + (surat.perihal ? surat.perihal.substring(0, 40) + (surat.perihal.length > 40 ? '...' : '') : '-') + '</td>';
+        html += '<td>' + (surat.perihal ? surat.perihal.substring(0, 30) + (surat.perihal.length > 30 ? '...' : '') : '-') + '</td>';
+        html += '<td>' + (surat.kepada ? surat.kepada.substring(0, 20) + (surat.kepada.length > 20 ? '...' : '') : '-') + '</td>';
         html += '<td><span class="status-badge ' + statusClass + '">' + (surat.status || 'Draft') + '</span></td>';
         html += '<td class="actions">';
         html += '<button class="btn-icon" onclick="viewSurat(\'' + surat.id + '\')" title="Lihat"><i class="fas fa-eye"></i></button>';
@@ -1156,22 +994,34 @@ function viewSurat(suratId) {
         filesHtml += '</ul></div>';
     }
     
-    var content = '<div class="surat-detail">' +
-        '<div class="detail-row"><label>Nomor:</label><span>' + surat.nomor + '</span></div>' +
-        '<div class="detail-row"><label>Jenis:</label><span>' + surat.jenis + '</span></div>' +
-        '<div class="detail-row"><label>Divisi:</label><span>' + surat.divisi + '</span></div>' +
-        '<div class="detail-row"><label>Sifat:</label><span>' + surat.sifat + '</span></div>' +
-        '<div class="detail-row"><label>Tanggal:</label><span>' + surat.tanggal + '</span></div>' +
-        '<div class="detail-row"><label>Kepada:</label><span>' + surat.kepada + '</span></div>' +
-        '<div class="detail-row"><label>Perihal:</label><span>' + surat.perihal + '</span></div>' +
-        '<div class="detail-row"><label>Lampiran:</label><span>' + surat.lampiran + '</span></div>' +
-        '<div class="detail-row"><label>Tembusan:</label><span>' + surat.tembusan + '</span></div>' +
-        '<div class="detail-row"><label>Status:</label><span>' + surat.status + '</span></div>' +
-        '<div class="detail-row"><label>Dibuat oleh:</label><span>' + surat.createdBy + '</span></div>' +
-        filesHtml +
-        '</div>';
+    var modalBody = document.getElementById('modalBody');
+    var modalTitle = document.getElementById('modalTitle');
+    var modal = document.getElementById('detailModal');
     
-    showModal('Detail Surat', content);
+    if (modalTitle) modalTitle.textContent = 'Detail Surat';
+    if (modalBody) {
+        modalBody.innerHTML = '<div class="surat-detail">' +
+            '<div class="detail-row"><label>Nomor:</label><span>' + surat.nomor + '</span></div>' +
+            '<div class="detail-row"><label>Jenis:</label><span>' + surat.jenis + '</span></div>' +
+            '<div class="detail-row"><label>Divisi:</label><span>' + surat.divisi + '</span></div>' +
+            '<div class="detail-row"><label>Sifat:</label><span>' + surat.sifat + '</span></div>' +
+            '<div class="detail-row"><label>Tanggal:</label><span>' + surat.tanggal + '</span></div>' +
+            '<div class="detail-row"><label>Kepada:</label><span>' + surat.kepada + '</span></div>' +
+            '<div class="detail-row"><label>Perihal:</label><span>' + surat.perihal + '</span></div>' +
+            '<div class="detail-row"><label>Lampiran:</label><span>' + surat.lampiran + '</span></div>' +
+            '<div class="detail-row"><label>Tembusan:</label><span>' + surat.tembusan + '</span></div>' +
+            '<div class="detail-row"><label>Status:</label><span>' + surat.status + '</span></div>' +
+            '<div class="detail-row"><label>Dibuat oleh:</label><span>' + (surat.created_by || '-') + '</span></div>' +
+            filesHtml +
+            '</div>';
+    }
+    
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeModal(modalId) {
+    var modal = document.getElementById(modalId);
+    if (modal) modal.style.display = 'none';
 }
 
 async function confirmDeleteSurat(suratId) {
@@ -1179,9 +1029,9 @@ async function confirmDeleteSurat(suratId) {
     if (!surat) return;
     
     if (confirm('Yakin ingin menghapus surat ' + surat.nomor + '?')) {
-        var result = await deleteSuratFromFirebase(suratId);
+        var result = await deleteSuratFromSupabase(suratId);
         
-        if (result.success || !firebaseReady) {
+        if (result.success) {
             suratData = suratData.filter(function(s) { return s.id !== suratId; });
             
             showToast('success', 'Berhasil', 'Surat berhasil dihapus');
@@ -1210,7 +1060,7 @@ function printSurat(suratId) {
     printWindow.document.write('<p><strong>Kepada Yth.</strong><br>' + surat.kepada + '</p>');
     printWindow.document.write('<div class="content"><p>Dengan hormat,</p><p>[Isi surat]</p></div>');
     printWindow.document.write('<div class="footer"><p>Makassar, ' + new Date(surat.tanggal).toLocaleDateString('id-ID') + '</p>');
-    printWindow.document.write('<p><br><br><br><u>' + surat.createdBy + '</u></p></div>');
+    printWindow.document.write('<p><br><br><br><u>' + (surat.created_by || '') + '</u></p></div>');
     printWindow.document.write('<p><strong>Tembusan:</strong><br>' + surat.tembusan + '</p>');
     printWindow.document.write('</body></html>');
     printWindow.document.close();
@@ -1233,9 +1083,6 @@ function downloadSurat(suratId) {
         'Lampiran   : ' + surat.lampiran + '\n\n' +
         '--------------------------------------------------------------------------------\n\n' +
         'Tembusan:\n- ' + surat.tembusan + '\n\n' +
-        '================================================================================\n' +
-        'Dokumen ini dibuat melalui CORSEC LENS\n' +
-        'Divisi Corporate Secretary - Bank Sulselbar\n' +
         '================================================================================\n';
     
     var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -1257,7 +1104,7 @@ function exportToExcel() {
     suratData.forEach(function(surat, index) {
         csv += (index + 1) + ',"' + surat.nomor + '","' + surat.tanggal + '","' + surat.jenis + '","' + 
                (surat.perihal || '').replace(/"/g, '""') + '","' + (surat.kepada || '').replace(/"/g, '""') + '","' + 
-               surat.sifat + '","' + surat.status + '","' + surat.createdBy + '"\n';
+               surat.sifat + '","' + surat.status + '","' + (surat.created_by || '') + '"\n';
     });
     
     var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -1275,7 +1122,7 @@ function exportToExcel() {
 function printList() { window.print(); }
 
 // ========================================
-// FILE UPLOAD
+// FILE UPLOAD - Lampiran Surat
 // ========================================
 function setupDragAndDrop() {
     if (dragDropInitialized) return;
@@ -1339,7 +1186,9 @@ function removeFile(fileName, button) {
     if (button) button.closest('.file-item').remove();
 }
 
-// FIX: Mencegah double upload
+// ========================================
+// UPLOAD DOKUMEN
+// ========================================
 function handleUploadFile(event) {
     if (isUploading) {
         console.log('Upload sedang berjalan, skip...');
@@ -1351,7 +1200,6 @@ function handleUploadFile(event) {
 }
 
 async function handleUploadFiles(files) {
-    // FIX: Cek apakah sedang upload
     if (isUploading) {
         console.log('Already uploading, skipped');
         return;
@@ -1387,15 +1235,16 @@ async function handleUploadFiles(files) {
         var progressBar = uploadItem.querySelector('.upload-progress-bar');
         
         try {
-            var timestamp = Date.now();
-            var path = 'dokumen/' + new Date().getFullYear() + '/' + (new Date().getMonth() + 1) + '/' + timestamp + '_' + file.name;
+            var path = 'dokumen/' + new Date().getFullYear() + '/' + (new Date().getMonth() + 1);
             
-            var result = await uploadFileWithProgress(file, path, function(progress) {
-                if (progressBar) progressBar.style.width = progress + '%';
-            });
+            if (progressBar) progressBar.style.width = '30%';
+            
+            var result = await uploadFileToSupabase(file, path);
+            
+            if (progressBar) progressBar.style.width = '70%';
             
             if (result.success) {
-                var saveResult = await saveDokumenToFirebase({
+                var saveResult = await saveDokumenToSupabase({
                     name: file.name,
                     size: file.size,
                     type: file.type,
@@ -1406,20 +1255,10 @@ async function handleUploadFiles(files) {
                     uploadedBy: currentUser ? (currentUser.name || currentUser.username) : 'User'
                 });
                 
+                if (progressBar) progressBar.style.width = '100%';
+                
                 if (saveResult.success) {
-                    // FIX: Tambahkan ke local array
-                    dokumenData.unshift({
-                        id: saveResult.id,
-                        name: file.name,
-                        size: file.size,
-                        type: file.type,
-                        url: result.url,
-                        path: result.path,
-                        kategori: kategori,
-                        keterangan: keterangan,
-                        uploadedBy: currentUser ? currentUser.name : 'User',
-                        createdAt: new Date()
-                    });
+                    dokumenData.unshift(saveResult.data);
                 }
                 
                 uploadItem.classList.add('complete');
@@ -1435,7 +1274,6 @@ async function handleUploadFiles(files) {
         }
     }
     
-    // Update UI
     updateDashboardStats();
     renderDokumenGrid();
     
@@ -1486,15 +1324,30 @@ function renderDokumenGrid() {
     grid.innerHTML = html;
 }
 
-function filterDokumenGrid() {
+function filterDokumenList() {
+    renderDokumenGrid();
+}
+
+function setView(viewType) {
+    var gridBtn = document.getElementById('gridViewBtn');
+    var listBtn = document.getElementById('listViewBtn');
+    
+    if (viewType === 'grid') {
+        if (gridBtn) gridBtn.classList.add('active');
+        if (listBtn) listBtn.classList.remove('active');
+    } else {
+        if (gridBtn) gridBtn.classList.remove('active');
+        if (listBtn) listBtn.classList.add('active');
+    }
+    
     renderDokumenGrid();
 }
 
 async function confirmDeleteDokumen(dokumenId, filePath) {
     if (confirm('Yakin ingin menghapus dokumen ini?')) {
-        var result = await deleteDokumenFromFirebase(dokumenId, filePath);
+        var result = await deleteDokumenFromSupabase(dokumenId, filePath);
         
-        if (result.success || !firebaseReady) {
+        if (result.success) {
             dokumenData = dokumenData.filter(function(d) { return d.id !== dokumenId; });
             
             showToast('success', 'Berhasil', 'Dokumen berhasil dihapus');
@@ -1539,7 +1392,7 @@ function renderFolderTree() {
     container.innerHTML = html;
     
     if (content) {
-        content.innerHTML = '<div class="empty-state"><i class="fas fa-hand-pointer"></i><p>Pilih folder untuk melihat isi</p></div>';
+        content.innerHTML = '<div class="empty-state"><i class="fas fa-folder-open"></i><p>Pilih folder untuk melihat isi</p></div>';
     }
 }
 
@@ -1638,51 +1491,8 @@ function showToast(type, title, message) {
     }, 5000);
 }
 
-function showModal(title, content) {
-    var modal = document.getElementById('modal');
-    var modalTitle = document.getElementById('modalTitle');
-    var modalBody = document.getElementById('modalBody');
-    
-    if (modal && modalTitle && modalBody) {
-        modalTitle.textContent = title;
-        modalBody.innerHTML = content;
-        modal.style.display = 'flex';
-    }
-}
-
-function closeModal() {
-    var modal = document.getElementById('modal');
-    if (modal) modal.style.display = 'none';
-}
-
 // ========================================
-// SAMPLE DATA
-// ========================================
-function loadSampleData() {
-    const now = Date.now();
-    suratData = [
-        {
-            id: String(now),
-            nomor: 'SR/001/B/DCS/XII/25',
-            jenis: 'Surat Biasa',
-            divisi: 'Corporate Secretary',
-            sifat: 'Biasa',
-            tanggal: '2025-12-18',
-            kepada: 'Direktur Utama Bank Sulselbar',
-            perihal: 'Laporan Pelaksanaan RUPST 2025',
-            lampiran: '3 Berkas',
-            tembusan: 'Arsip',
-            status: 'Selesai',
-            files: [],
-            createdBy: 'Safirah Wardinah'
-        }
-    ];
-    
-    nomorCounters = { 'Surat Biasa': 1 };
-}
-
-// ========================================
-// REPORTS
+// REPORTS & SETTINGS
 // ========================================
 function previewReport() {
     showToast('info', 'Preview', 'Gunakan Export atau Print untuk melihat laporan');
@@ -1692,19 +1502,20 @@ function generateReport() {
     exportToExcel();
 }
 
-function saveProfile() {
-    showToast('success', 'Berhasil', 'Profil berhasil disimpan');
+function saveSettings() {
+    showToast('success', 'Berhasil', 'Pengaturan berhasil disimpan');
 }
 
-function changePassword() {
+function showChangePassword() {
     showToast('info', 'Info', 'Fitur ubah password - hubungi admin');
 }
 
+// Close modal on click outside
 window.onclick = function(event) {
-    var modal = document.getElementById('modal');
+    var modal = document.getElementById('detailModal');
     if (event.target === modal) {
-        closeModal();
+        modal.style.display = 'none';
     }
 };
 
-console.log('CORSEC LENS v2.0.1 - Firebase Integration Fixed');
+console.log('CORSEC LENS v3.0.0 - Supabase Integration');
