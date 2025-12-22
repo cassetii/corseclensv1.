@@ -8,7 +8,7 @@
 // SUPABASE CONFIGURATION
 // ========================================
 const SUPABASE_URL = 'https://adjpfbvvsinoyxddxahr.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_p_XTy6AgFwl5DIPgRk7pug_GKfnXUaQ';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkanBmYnZ2c2lub3l4ZGR4YWhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYzOTAwMTYsImV4cCI6MjA4MTk2NjAxNn0.MEoO2DWs2vQFB0S2tBQTMhHvsJylIGXaC5du1VkZHK0';
 const STORAGE_BUCKET = 'corsec-files';
 
 let supabaseClient = null;
