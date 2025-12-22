@@ -14,29 +14,47 @@
 // FIREBASE CONFIGURATION
 // ========================================
 const firebaseConfig = {
-    apiKey: "AIzaSyA7oIAneGoOPPBJugiDHle6ES8z-D_40HI",
-    authDomain: "corse-c7e13.firebaseapp.com",
-    projectId: "corse-c7e13",
-    storageBucket: "corse-c7e13.firebasestorage.app",
-    messagingSenderId: "669275726218",
-    appId: "1:669275726218:web:73379cfb989d7eb70ae873",
-    measurementId: "G-R9XHK5CS7B"
+    apiKey: "AIzaSyBI5T3ZVyHXSRFikTjSlnW9P04cO1UDAwg",
+    authDomain: "databasebesar.firebaseapp.com",
+    projectId: "databasebesar",
+    storageBucket: "databasebesar.firebasestorage.app",
+    messagingSenderId: "253231829334",
+    appId: "1:253231829334:web:d1c0a458aab2f521c546f7",
+    measurementId: "G-9CT0LE4FHQ"
 };
+
+// CORSEC LENS menggunakan folder terpisah agar tidak mengganggu data lain
+const CORSEC_STORAGE_PATH = 'corsec_lens';  // Folder khusus di Storage
+const CORSEC_COLLECTION = 'corsec_lens';     // Collection khusus di Firestore
 
 // Initialize Firebase
 let app, db, storage, auth;
 let firebaseReady = false;
 
 function initFirebase() {
+    // Check if Firebase SDK loaded
+    if (typeof firebase === 'undefined') {
+        console.warn('Firebase SDK not loaded - running in offline mode');
+        firebaseReady = false;
+        return;
+    }
+    
     try {
-        app = firebase.initializeApp(firebaseConfig);
+        // Check if already initialized
+        if (firebase.apps && firebase.apps.length > 0) {
+            app = firebase.apps[0];
+        } else {
+            app = firebase.initializeApp(firebaseConfig);
+        }
+        
         db = firebase.firestore();
         storage = firebase.storage();
         auth = firebase.auth();
         firebaseReady = true;
-        console.log('Firebase initialized successfully');
+        console.log('✅ Firebase initialized successfully');
     } catch (error) {
         console.error('Firebase init error:', error);
+        console.warn('Running in offline/demo mode');
         firebaseReady = false;
     }
 }
@@ -113,7 +131,8 @@ async function saveSuratToFirebase(suratObj) {
     }
     
     try {
-        const docRef = await db.collection('surat').add({
+        // Gunakan subcollection di dalam corsec_lens
+        const docRef = await db.collection(CORSEC_COLLECTION).doc('data').collection('surat').add({
             ...suratObj,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -130,7 +149,7 @@ async function updateSuratInFirebase(suratId, updateData) {
     if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
     
     try {
-        await db.collection('surat').doc(suratId).update({
+        await db.collection(CORSEC_COLLECTION).doc('data').collection('surat').doc(suratId).update({
             ...updateData,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -145,7 +164,7 @@ async function deleteSuratFromFirebase(suratId) {
     if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
     
     try {
-        await db.collection('surat').doc(suratId).delete();
+        await db.collection(CORSEC_COLLECTION).doc('data').collection('surat').doc(suratId).delete();
         return { success: true };
     } catch (error) {
         console.error('Delete surat error:', error);
@@ -157,7 +176,7 @@ async function deleteSuratFromFirebase(suratId) {
 function listenToSurat() {
     if (!firebaseReady) return;
     
-    unsubscribeSurat = db.collection('surat')
+    unsubscribeSurat = db.collection(CORSEC_COLLECTION).doc('data').collection('surat')
         .orderBy('createdAt', 'desc')
         .onSnapshot((snapshot) => {
             suratData = [];
@@ -183,7 +202,7 @@ async function getNomorCounter(jenisSurat) {
     if (!firebaseReady) return nomorCounters[jenisSurat] || 0;
     
     try {
-        const counterRef = db.collection('counters').doc('surat');
+        const counterRef = db.collection(CORSEC_COLLECTION).doc('counters');
         const doc = await counterRef.get();
         
         if (doc.exists && doc.data()[jenisSurat]) {
@@ -203,7 +222,7 @@ async function incrementNomorCounter(jenisSurat) {
     }
     
     try {
-        const counterRef = db.collection('counters').doc('surat');
+        const counterRef = db.collection(CORSEC_COLLECTION).doc('counters');
         
         await db.runTransaction(async (transaction) => {
             const doc = await transaction.get(counterRef);
@@ -226,13 +245,15 @@ async function incrementNomorCounter(jenisSurat) {
 // ========================================
 // FIREBASE - STORAGE (FILE UPLOAD)
 // ========================================
-async function uploadFileToStorage(file, path) {
+async function uploadFileToStorage(file, customPath) {
     if (!firebaseReady) {
         return { success: false, error: 'Firebase not ready' };
     }
     
     try {
         const storageRef = storage.ref();
+        // Selalu gunakan folder corsec_lens di Storage
+        const path = CORSEC_STORAGE_PATH + '/' + customPath;
         const fileRef = storageRef.child(path);
         
         const snapshot = await fileRef.put(file);
@@ -252,7 +273,7 @@ async function uploadFileToStorage(file, path) {
     }
 }
 
-function uploadFileWithProgress(file, path, onProgress) {
+function uploadFileWithProgress(file, customPath, onProgress) {
     return new Promise((resolve, reject) => {
         if (!firebaseReady) {
             reject({ success: false, error: 'Firebase not ready' });
@@ -260,6 +281,8 @@ function uploadFileWithProgress(file, path, onProgress) {
         }
         
         const storageRef = storage.ref();
+        // Selalu gunakan folder corsec_lens di Storage
+        const path = CORSEC_STORAGE_PATH + '/' + customPath;
         const fileRef = storageRef.child(path);
         const uploadTask = fileRef.put(file);
         
@@ -307,7 +330,7 @@ async function saveDokumenToFirebase(dokumenObj) {
     if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
     
     try {
-        const docRef = await db.collection('dokumen').add({
+        const docRef = await db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen').add({
             ...dokumenObj,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -329,7 +352,7 @@ async function deleteDokumenFromFirebase(dokumenId, filePath) {
         }
         
         // Hapus metadata dari Firestore
-        await db.collection('dokumen').doc(dokumenId).delete();
+        await db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen').doc(dokumenId).delete();
         
         return { success: true };
     } catch (error) {
@@ -342,7 +365,7 @@ async function deleteDokumenFromFirebase(dokumenId, filePath) {
 function listenToDokumen() {
     if (!firebaseReady) return;
     
-    unsubscribeDokumen = db.collection('dokumen')
+    unsubscribeDokumen = db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen')
         .orderBy('createdAt', 'desc')
         .onSnapshot((snapshot) => {
             dokumenData = [];
@@ -472,48 +495,31 @@ function setupEventListeners() {
 async function handleLogin(event) {
     event.preventDefault();
     
-    var username = document.getElementById('username').value;
+    var username = document.getElementById('username').value.trim().toLowerCase();
     var password = document.getElementById('password').value;
-    var remember = document.getElementById('remember').checked;
+    var remember = document.getElementById('remember') ? document.getElementById('remember').checked : false;
+    
+    if (!username || !password) {
+        showToast('error', 'Error', 'Username dan password harus diisi');
+        return;
+    }
     
     // Show loading
     var loginBtn = document.querySelector('#loginForm button[type="submit"]');
-    var originalText = loginBtn.innerHTML;
-    loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
-    loginBtn.disabled = true;
-    
-    // Try Firebase login first
-    if (firebaseReady) {
-        var email = username.includes('@') ? username : username + '@banksulselbar.co.id';
-        var result = await firebaseLogin(email, password);
-        
-        if (result.success) {
-            currentUser = result.user;
-            
-            if (remember) {
-                localStorage.setItem('corsecSession', JSON.stringify(currentUser));
-            }
-            
-            showToast('success', 'Login Berhasil', 'Selamat datang, ' + (currentUser.name || username));
-            showMainApp();
-            
-            // Start realtime listeners
-            listenToSurat();
-            listenToDokumen();
-            
-            loginBtn.innerHTML = originalText;
-            loginBtn.disabled = false;
-            return;
-        }
+    var originalText = loginBtn ? loginBtn.innerHTML : '';
+    if (loginBtn) {
+        loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
+        loginBtn.disabled = true;
     }
     
-    // Fallback: Demo login
+    // Demo users - ALWAYS available
     var demoUsers = {
         'safirah': { password: 'corsec2025', name: 'Safirah Wardinah Irianto', role: 'Asisten Administrasi' },
         'hartani': { password: 'pemimpin2025', name: 'Hartani Syamsuddin', role: 'Pemimpin DCS' },
         'admin': { password: 'admin123', name: 'Administrator', role: 'Admin' }
     };
     
+    // Check demo login FIRST
     if (demoUsers[username] && demoUsers[username].password === password) {
         currentUser = { username: username, ...demoUsers[username] };
         
@@ -528,12 +534,62 @@ async function handleLogin(event) {
         if (suratData.length === 0) {
             loadSampleData();
         }
-    } else {
-        showToast('error', 'Login Gagal', 'Username atau password salah');
+        
+        // Try to start Firebase listeners (optional)
+        if (firebaseReady) {
+            try {
+                listenToSurat();
+                listenToDokumen();
+            } catch (e) {
+                console.warn('Firebase listeners failed:', e);
+            }
+        }
+        
+        if (loginBtn) {
+            loginBtn.innerHTML = originalText;
+            loginBtn.disabled = false;
+        }
+        return;
     }
     
-    loginBtn.innerHTML = originalText;
-    loginBtn.disabled = false;
+    // If not demo user, try Firebase login
+    if (firebaseReady) {
+        try {
+            var email = username.includes('@') ? username : username + '@banksulselbar.co.id';
+            var result = await firebaseLogin(email, password);
+            
+            if (result.success) {
+                currentUser = result.user;
+                
+                if (remember) {
+                    localStorage.setItem('corsecSession', JSON.stringify(currentUser));
+                }
+                
+                showToast('success', 'Login Berhasil', 'Selamat datang, ' + (currentUser.name || username));
+                showMainApp();
+                
+                // Start realtime listeners
+                listenToSurat();
+                listenToDokumen();
+                
+                if (loginBtn) {
+                    loginBtn.innerHTML = originalText;
+                    loginBtn.disabled = false;
+                }
+                return;
+            }
+        } catch (e) {
+            console.error('Firebase login error:', e);
+        }
+    }
+    
+    // Login failed
+    showToast('error', 'Login Gagal', 'Username atau password salah');
+    
+    if (loginBtn) {
+        loginBtn.innerHTML = originalText;
+        loginBtn.disabled = false;
+    }
 }
 
 async function handleLogout() {
