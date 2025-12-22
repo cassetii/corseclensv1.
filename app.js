@@ -1,7 +1,7 @@
 /**
  * CORSEC LENS - Aplikasi Penomoran Naskah Dinas
  * PT Bank Sulselbar - Divisi Corporate Secretary
- * Version 3.0.0 - Supabase Integration
+ * Version 3.0.1 - Supabase Integration (Fixed)
  */
 
 // ========================================
@@ -50,11 +50,11 @@ let isLoadingData = false;
 // SUPABASE - LOAD DATA
 // ========================================
 async function loadSuratFromSupabase() {
-    if (!supabaseReady) return [];
+    if (!supabaseReady || !supabaseClient) return [];
     
     try {
         console.log('Loading surat from Supabase...');
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
             .from('surat')
             .select('*')
             .order('created_at', { ascending: false })
@@ -72,11 +72,11 @@ async function loadSuratFromSupabase() {
 }
 
 async function loadDokumenFromSupabase() {
-    if (!supabaseReady) return [];
+    if (!supabaseReady || !supabaseClient) return [];
     
     try {
         console.log('Loading dokumen from Supabase...');
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
             .from('dokumen')
             .select('*')
             .order('created_at', { ascending: false })
@@ -94,17 +94,17 @@ async function loadDokumenFromSupabase() {
 }
 
 async function loadCountersFromSupabase() {
-    if (!supabaseReady) return;
+    if (!supabaseReady || !supabaseClient) return;
     
     try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
             .from('counters')
             .select('*');
         
         if (error) throw error;
         
         nomorCounters = {};
-        (data || []).forEach(row => {
+        (data || []).forEach(function(row) {
             nomorCounters[row.id] = row.value;
         });
         console.log('✅ Loaded counters');
@@ -117,12 +117,12 @@ async function loadCountersFromSupabase() {
 // SUPABASE - SURAT OPERATIONS
 // ========================================
 async function saveSuratToSupabase(suratObj) {
-    if (!supabaseReady) {
+    if (!supabaseReady || !supabaseClient) {
         return { success: false, error: 'Supabase not ready' };
     }
     
     try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
             .from('surat')
             .insert([{
                 nomor: suratObj.nomor,
@@ -150,10 +150,10 @@ async function saveSuratToSupabase(suratObj) {
 }
 
 async function deleteSuratFromSupabase(suratId) {
-    if (!supabaseReady) return { success: false };
+    if (!supabaseReady || !supabaseClient) return { success: false };
     
     try {
-        const { error } = await supabase
+        const { error } = await supabaseClient
             .from('surat')
             .delete()
             .eq('id', suratId);
@@ -174,10 +174,10 @@ async function getNomorCounter(jenisSurat) {
         return nomorCounters[jenisSurat];
     }
     
-    if (!supabaseReady) return 0;
+    if (!supabaseReady || !supabaseClient) return 0;
     
     try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
             .from('counters')
             .select('value')
             .eq('id', jenisSurat)
@@ -185,7 +185,7 @@ async function getNomorCounter(jenisSurat) {
         
         if (error && error.code !== 'PGRST116') throw error;
         
-        const value = data ? data.value : 0;
+        var value = data ? data.value : 0;
         nomorCounters[jenisSurat] = value;
         return value;
     } catch (error) {
@@ -197,10 +197,10 @@ async function getNomorCounter(jenisSurat) {
 async function incrementNomorCounter(jenisSurat) {
     nomorCounters[jenisSurat] = (nomorCounters[jenisSurat] || 0) + 1;
     
-    if (!supabaseReady) return { success: true };
+    if (!supabaseReady || !supabaseClient) return { success: true };
     
     try {
-        const { error } = await supabase
+        const { error } = await supabaseClient
             .from('counters')
             .upsert({ 
                 id: jenisSurat, 
@@ -219,14 +219,14 @@ async function incrementNomorCounter(jenisSurat) {
 // SUPABASE - STORAGE (FILE UPLOAD)
 // ========================================
 async function uploadFileToSupabase(file, customPath) {
-    if (!supabaseReady) {
+    if (!supabaseReady || !supabaseClient) {
         return { success: false, error: 'Supabase not ready' };
     }
     
     try {
-        const timestamp = Date.now();
-        const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-        const path = customPath + '/' + timestamp + '_' + safeName;
+        var timestamp = Date.now();
+        var safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+        var path = customPath + '/' + timestamp + '_' + safeName;
         
         console.log('Uploading to:', path);
         
@@ -257,7 +257,7 @@ async function uploadFileToSupabase(file, customPath) {
 }
 
 async function deleteFileFromSupabase(path) {
-    if (!supabaseReady) return { success: false };
+    if (!supabaseReady || !supabaseClient) return { success: false };
     
     try {
         const { error } = await supabaseClient.storage
@@ -276,10 +276,10 @@ async function deleteFileFromSupabase(path) {
 // SUPABASE - DOKUMEN OPERATIONS
 // ========================================
 async function saveDokumenToSupabase(dokumenObj) {
-    if (!supabaseReady) return { success: false };
+    if (!supabaseReady || !supabaseClient) return { success: false };
     
     try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
             .from('dokumen')
             .insert([{
                 name: dokumenObj.name,
@@ -302,14 +302,14 @@ async function saveDokumenToSupabase(dokumenObj) {
 }
 
 async function deleteDokumenFromSupabase(dokumenId, filePath) {
-    if (!supabaseReady) return { success: false };
+    if (!supabaseReady || !supabaseClient) return { success: false };
     
     try {
         if (filePath) {
             await deleteFileFromSupabase(filePath);
         }
         
-        const { error } = await supabase
+        const { error } = await supabaseClient
             .from('dokumen')
             .delete()
             .eq('id', dokumenId);
@@ -343,7 +343,7 @@ function cleanupResources() {
 document.addEventListener('DOMContentLoaded', function() {
     initSupabase();
     
-    const session = localStorage.getItem('corsecSession');
+    var session = localStorage.getItem('corsecSession');
     if (session) {
         currentUser = JSON.parse(session);
         showMainApp();
@@ -413,7 +413,7 @@ async function handleLogin(event) {
     };
     
     if (demoUsers[username] && demoUsers[username].password === password) {
-        currentUser = { username: username, ...demoUsers[username] };
+        currentUser = { username: username, name: demoUsers[username].name, role: demoUsers[username].role };
         
         if (remember) {
             localStorage.setItem('corsecSession', JSON.stringify(currentUser));
@@ -465,7 +465,6 @@ async function showMainApp() {
     if (loginPage) loginPage.style.display = 'none';
     mainApp.style.display = 'flex';
     
-    // Update user info
     var userName = document.getElementById('userDisplayName');
     var userRole = document.getElementById('userRole');
     var headerUserName = document.getElementById('headerUserName');
@@ -476,8 +475,7 @@ async function showMainApp() {
     if (headerUserName) headerUserName.textContent = (currentUser.name || '').split(' ')[0];
     if (welcomeName) welcomeName.textContent = (currentUser.name || '').split(' ')[0];
     
-    // Load data dari Supabase
-    if (supabaseReady) {
+    if (supabaseReady && supabaseClient) {
         isLoadingData = true;
         showToast('info', 'Loading', 'Mengambil data...');
         
@@ -613,13 +611,11 @@ function updateDashboardStats() {
     var prosesCount = suratData.filter(function(s) { return s.status === 'Proses' || s.status === 'Draft'; }).length;
     var totalDokumenCount = dokumenData.length;
     
-    // Update dengan ID yang benar sesuai HTML
     animateCounter('totalSurat', totalSuratCount);
     animateCounter('suratSelesai', selesaiCount);
     animateCounter('suratProses', prosesCount);
     animateCounter('totalDokumen', totalDokumenCount);
     
-    // Update sidebar badges
     var suratCountEl = document.getElementById('suratCount');
     var arsipCountEl = document.getElementById('arsipCount');
     if (suratCountEl) suratCountEl.textContent = totalSuratCount;
@@ -849,7 +845,8 @@ async function handleCreateSurat(event) {
         
         var fileUrls = [];
         if (uploadedFiles.length > 0) {
-            for (var file of uploadedFiles) {
+            for (var i = 0; i < uploadedFiles.length; i++) {
+                var file = uploadedFiles[i];
                 var path = 'surat/' + nomor.replace(/\//g, '-');
                 var uploadResult = await uploadFileToSupabase(file, path);
                 if (uploadResult.success) {
@@ -940,8 +937,8 @@ function renderSuratTable() {
     
     var filtered = suratData.filter(function(surat) {
         var matchSearch = !searchValue || 
-            (surat.nomor && surat.nomor.toLowerCase().includes(searchValue)) || 
-            (surat.perihal && surat.perihal.toLowerCase().includes(searchValue));
+            (surat.nomor && surat.nomor.toLowerCase().indexOf(searchValue) !== -1) || 
+            (surat.perihal && surat.perihal.toLowerCase().indexOf(searchValue) !== -1);
         var matchJenis = !jenisValue || surat.jenis === jenisValue;
         var matchStatus = !statusValue || surat.status === statusValue;
         return matchSearch && matchJenis && matchStatus;
@@ -1219,7 +1216,9 @@ async function handleUploadFiles(files) {
         return;
     }
     
-    for (var file of Array.from(files)) {
+    for (var i = 0; i < files.length; i++) {
+        var file = files[i];
+        
         if (file.size > 25 * 1024 * 1024) {
             showToast('error', 'Error', 'File ' + file.name + ' terlalu besar (max 25MB)');
             continue;
@@ -1294,7 +1293,7 @@ function renderDokumenGrid() {
     var kategoriValue = filterKategori ? filterKategori.value : '';
     
     var filtered = dokumenData.filter(function(doc) {
-        var matchSearch = !searchValue || (doc.name && doc.name.toLowerCase().includes(searchValue));
+        var matchSearch = !searchValue || (doc.name && doc.name.toLowerCase().indexOf(searchValue) !== -1);
         var matchKategori = !kategoriValue || doc.kategori === kategoriValue;
         return matchSearch && matchKategori;
     });
@@ -1377,7 +1376,7 @@ function renderFolderTree() {
     suratData.forEach(function(surat) {
         var cat = 'Surat: ' + surat.jenis;
         if (!folders[cat]) folders[cat] = [];
-        folders[cat].push({ type: 'surat', ...surat });
+        folders[cat].push({ type: 'surat', nomor: surat.nomor, perihal: surat.perihal });
     });
     
     var html = '<ul class="folder-list">';
@@ -1406,13 +1405,13 @@ function openFolder(folderName, evt) {
     
     dokumenData.forEach(function(doc) {
         if ((doc.kategori || 'Lainnya') === folderName) {
-            items.push({ type: 'dokumen', ...doc });
+            items.push({ type: 'dokumen', name: doc.name, url: doc.url, fileType: doc.type });
         }
     });
     
     suratData.forEach(function(surat) {
         if (('Surat: ' + surat.jenis) === folderName) {
-            items.push({ type: 'surat', ...surat });
+            items.push({ type: 'surat', nomor: surat.nomor, perihal: surat.perihal });
         }
     });
     
@@ -1431,7 +1430,7 @@ function openFolder(folderName, evt) {
             html += '</div>';
         } else {
             html += '<div class="folder-item-card">';
-            html += '<i class="fas ' + getFileIcon(item.type) + '"></i>';
+            html += '<i class="fas ' + getFileIcon(item.fileType) + '"></i>';
             html += '<span>' + item.name + '</span>';
             if (item.url) {
                 html += '<a href="' + item.url + '" target="_blank" class="btn-sm">Buka</a>';
@@ -1449,11 +1448,11 @@ function openFolder(folderName, evt) {
 // ========================================
 function getFileIcon(mimeType) {
     if (!mimeType) return 'fa-file';
-    if (mimeType.includes('pdf')) return 'fa-file-pdf';
-    if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word';
-    if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'fa-file-excel';
-    if (mimeType.includes('image')) return 'fa-file-image';
-    if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint';
+    if (mimeType.indexOf('pdf') !== -1) return 'fa-file-pdf';
+    if (mimeType.indexOf('word') !== -1 || mimeType.indexOf('document') !== -1) return 'fa-file-word';
+    if (mimeType.indexOf('excel') !== -1 || mimeType.indexOf('spreadsheet') !== -1) return 'fa-file-excel';
+    if (mimeType.indexOf('image') !== -1) return 'fa-file-image';
+    if (mimeType.indexOf('powerpoint') !== -1 || mimeType.indexOf('presentation') !== -1) return 'fa-file-powerpoint';
     return 'fa-file';
 }
 
@@ -1510,7 +1509,6 @@ function showChangePassword() {
     showToast('info', 'Info', 'Fitur ubah password - hubungi admin');
 }
 
-// Close modal on click outside
 window.onclick = function(event) {
     var modal = document.getElementById('detailModal');
     if (event.target === modal) {
@@ -1518,4 +1516,4 @@ window.onclick = function(event) {
     }
 };
 
-console.log('CORSEC LENS v3.0.0 - Supabase Integration');
+console.log('CORSEC LENS v3.0.1 - Supabase Integration');
