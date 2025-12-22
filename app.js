@@ -1,117 +1,394 @@
 /**
  * CORSEC LENS - Aplikasi Penomoran Naskah Dinas
  * PT Bank Sulselbar - Divisi Corporate Secretary
- * Version 1.0.3 - Chart Bug Fixed
+ * Version 2.0.0 - Firebase Integration
  * 
- * Changelog v1.0.3:
- * - Fixed: Chart BENAR-BENAR dibersihkan dengan clearRect()
- * - Added: Helper function destroyChart() untuk clear canvas
- * 
- * Changelog v1.0.2:
- * - Fixed: Chart infinite bertambah saat navigasi cepat
- * - Fixed: Memory leak pada upload progress interval
- * - Fixed: AnimateCounter multiple intervals
- * - Fixed: Event listener accumulation
- * - Fixed: Undefined event variable di openFolder
- * - Added: Proper cleanup untuk semua timeouts/intervals
- * - Updated: Format penomoran sesuai Bank Sulselbar
+ * Fitur:
+ * - Data tersimpan permanen di Firebase Firestore
+ * - File dokumen tersimpan di Firebase Storage
+ * - Multi-user dengan Authentication
+ * - Realtime sync antar device
  */
 
 // ========================================
-// DATA STORAGE
+// FIREBASE CONFIGURATION
+// ========================================
+const firebaseConfig = {
+    apiKey: "AIzaSyA7oIAneGoOPPBJugiDHle6ES8z-D_40HI",
+    authDomain: "corse-c7e13.firebaseapp.com",
+    projectId: "corse-c7e13",
+    storageBucket: "corse-c7e13.firebasestorage.app",
+    messagingSenderId: "669275726218",
+    appId: "1:669275726218:web:73379cfb989d7eb70ae873",
+    measurementId: "G-R9XHK5CS7B"
+};
+
+// Initialize Firebase
+let app, db, storage, auth;
+let firebaseReady = false;
+
+function initFirebase() {
+    try {
+        app = firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+        storage = firebase.storage();
+        auth = firebase.auth();
+        firebaseReady = true;
+        console.log('Firebase initialized successfully');
+    } catch (error) {
+        console.error('Firebase init error:', error);
+        firebaseReady = false;
+    }
+}
+
+// ========================================
+// GLOBAL VARIABLES
 // ========================================
 let currentUser = null;
 let suratData = [];
 let dokumenData = [];
+let nomorCounters = {};
 let uploadedFiles = [];
-let currentPage = 1;
-const itemsPerPage = 10;
 
-// ========================================
-// BUG FIX: Tracking untuk timeouts dan intervals
-// ========================================
+// BUG FIX: Track timeouts dan intervals
 let chartTimeouts = {};
 let counterIntervals = {};
 let uploadIntervals = [];
 let autoSaveInterval = null;
 let dragDropInitialized = false;
 
-// Counter penomoran untuk setiap jenis surat (sesuai format Bank Sulselbar)
-let nomorCounters = {
-    'Surat Biasa': 1,
-    'Surat Rahasia': 1,
-    'Surat Keputusan': 1,
-    'Surat Edaran': 1,
-    'Memo Direksi': 1,
-    'Memo Corsec': 1,
-    'PKS': 1,
-    'MoU': 1,
-    'Notulen Radir': 1,
-    'Surat Tugas': 1,
-    'Surat Undangan': 1,
-    'Nota Dinas': 1
-};
-
-// User accounts for authentication
-const userAccounts = [
-    {
-        username: 'safirah',
-        password: 'corsec2025',
-        name: 'Safirah Wardinah Irianto',
-        nip: '199501012020012001',
-        role: 'Asisten Administrasi',
-        division: 'Corporate Secretary'
-    },
-    {
-        username: 'hartani',
-        password: 'pemimpin2025',
-        name: 'Hartani Djurnie',
-        nip: '198001012010011001',
-        role: 'Pemimpin DCS',
-        division: 'Corporate Secretary'
-    },
-    {
-        username: 'admin',
-        password: 'admin123',
-        name: 'Administrator',
-        nip: '-',
-        role: 'Administrator',
-        division: 'Corporate Secretary'
-    }
-];
+// Unsubscribe functions untuk realtime listeners
+let unsubscribeSurat = null;
+let unsubscribeDokumen = null;
 
 // ========================================
-// INITIALIZATION
+// FIREBASE - AUTHENTICATION
 // ========================================
-document.addEventListener('DOMContentLoaded', function() {
-    initializeApp();
-});
-
-function initializeApp() {
-    loadFromStorage();
-    
-    const savedSession = localStorage.getItem('corsecSession') || sessionStorage.getItem('corsecSession');
-    if (savedSession) {
-        currentUser = JSON.parse(savedSession);
-        showApp();
+async function firebaseLogin(email, password) {
+    if (!firebaseReady) {
+        return { success: false, error: 'Firebase not initialized' };
     }
     
-    updateCurrentDate();
-    initializeDateInputs();
-    setupDragAndDrop();
-    updateDashboardStats();
-    startAutoSave();
+    try {
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        
+        // Cek apakah user ada di Firestore
+        const userDoc = await db.collection('users').doc(user.uid).get();
+        
+        if (userDoc.exists) {
+            return {
+                success: true,
+                user: { uid: user.uid, email: user.email, ...userDoc.data() }
+            };
+        }
+        
+        return { success: true, user: { uid: user.uid, email: user.email, name: email.split('@')[0] } };
+    } catch (error) {
+        console.error('Login error:', error);
+        return { success: false, error: error.message };
+    }
 }
 
-// BUG FIX: Tracked auto-save interval
-function startAutoSave() {
-    if (autoSaveInterval) clearInterval(autoSaveInterval);
-    autoSaveInterval = setInterval(function() { 
-        if (suratData.length > 0 || dokumenData.length > 0) saveToStorage(); 
-    }, 30000);
+async function firebaseLogout() {
+    try {
+        // Unsubscribe dari realtime listeners
+        if (unsubscribeSurat) unsubscribeSurat();
+        if (unsubscribeDokumen) unsubscribeDokumen();
+        
+        await auth.signOut();
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
 }
 
-// BUG FIX: Cleanup function untuk semua resources
+// ========================================
+// FIREBASE - SURAT OPERATIONS
+// ========================================
+async function saveSuratToFirebase(suratObj) {
+    if (!firebaseReady) {
+        console.warn('Firebase not ready, saving to localStorage');
+        return saveToLocalStorage(suratObj);
+    }
+    
+    try {
+        const docRef = await db.collection('surat').add({
+            ...suratObj,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { success: true, id: docRef.id };
+    } catch (error) {
+        console.error('Save surat error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+async function updateSuratInFirebase(suratId, updateData) {
+    if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
+    
+    try {
+        await db.collection('surat').doc(suratId).update({
+            ...updateData,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        return { success: true };
+    } catch (error) {
+        console.error('Update surat error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+async function deleteSuratFromFirebase(suratId) {
+    if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
+    
+    try {
+        await db.collection('surat').doc(suratId).delete();
+        return { success: true };
+    } catch (error) {
+        console.error('Delete surat error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Realtime listener untuk surat
+function listenToSurat() {
+    if (!firebaseReady) return;
+    
+    unsubscribeSurat = db.collection('surat')
+        .orderBy('createdAt', 'desc')
+        .onSnapshot((snapshot) => {
+            suratData = [];
+            snapshot.forEach(doc => {
+                suratData.push({ id: doc.id, visibleId: doc.id, ...doc.data() });
+            });
+            
+            // Update UI
+            if (document.getElementById('suratTableBody')) {
+                renderSuratTable();
+            }
+            updateDashboardStats();
+            renderActivityList();
+        }, (error) => {
+            console.error('Listen surat error:', error);
+        });
+}
+
+// ========================================
+// FIREBASE - COUNTER OPERATIONS
+// ========================================
+async function getNomorCounter(jenisSurat) {
+    if (!firebaseReady) return nomorCounters[jenisSurat] || 0;
+    
+    try {
+        const counterRef = db.collection('counters').doc('surat');
+        const doc = await counterRef.get();
+        
+        if (doc.exists && doc.data()[jenisSurat]) {
+            return doc.data()[jenisSurat];
+        }
+        return 0;
+    } catch (error) {
+        console.error('Get counter error:', error);
+        return nomorCounters[jenisSurat] || 0;
+    }
+}
+
+async function incrementNomorCounter(jenisSurat) {
+    if (!firebaseReady) {
+        nomorCounters[jenisSurat] = (nomorCounters[jenisSurat] || 0) + 1;
+        return { success: true };
+    }
+    
+    try {
+        const counterRef = db.collection('counters').doc('surat');
+        
+        await db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(counterRef);
+            
+            if (!doc.exists) {
+                transaction.set(counterRef, { [jenisSurat]: 1 });
+            } else {
+                const currentValue = doc.data()[jenisSurat] || 0;
+                transaction.update(counterRef, { [jenisSurat]: currentValue + 1 });
+            }
+        });
+        
+        return { success: true };
+    } catch (error) {
+        console.error('Increment counter error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// ========================================
+// FIREBASE - STORAGE (FILE UPLOAD)
+// ========================================
+async function uploadFileToStorage(file, path) {
+    if (!firebaseReady) {
+        return { success: false, error: 'Firebase not ready' };
+    }
+    
+    try {
+        const storageRef = storage.ref();
+        const fileRef = storageRef.child(path);
+        
+        const snapshot = await fileRef.put(file);
+        const downloadURL = await snapshot.ref.getDownloadURL();
+        
+        return {
+            success: true,
+            url: downloadURL,
+            path: path,
+            name: file.name,
+            size: file.size,
+            type: file.type
+        };
+    } catch (error) {
+        console.error('Upload error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+function uploadFileWithProgress(file, path, onProgress) {
+    return new Promise((resolve, reject) => {
+        if (!firebaseReady) {
+            reject({ success: false, error: 'Firebase not ready' });
+            return;
+        }
+        
+        const storageRef = storage.ref();
+        const fileRef = storageRef.child(path);
+        const uploadTask = fileRef.put(file);
+        
+        uploadTask.on('state_changed',
+            (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                if (onProgress) onProgress(progress);
+            },
+            (error) => {
+                reject({ success: false, error: error.message });
+            },
+            async () => {
+                const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
+                resolve({
+                    success: true,
+                    url: downloadURL,
+                    path: path,
+                    name: file.name,
+                    size: file.size,
+                    type: file.type
+                });
+            }
+        );
+    });
+}
+
+async function deleteFileFromStorage(path) {
+    if (!firebaseReady) return { success: false };
+    
+    try {
+        const storageRef = storage.ref();
+        const fileRef = storageRef.child(path);
+        await fileRef.delete();
+        return { success: true };
+    } catch (error) {
+        console.error('Delete file error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// ========================================
+// FIREBASE - DOKUMEN OPERATIONS
+// ========================================
+async function saveDokumenToFirebase(dokumenObj) {
+    if (!firebaseReady) return { success: false, error: 'Firebase not ready' };
+    
+    try {
+        const docRef = await db.collection('dokumen').add({
+            ...dokumenObj,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { success: true, id: docRef.id };
+    } catch (error) {
+        console.error('Save dokumen error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+async function deleteDokumenFromFirebase(dokumenId, filePath) {
+    if (!firebaseReady) return { success: false };
+    
+    try {
+        // Hapus file dari Storage
+        if (filePath) {
+            await deleteFileFromStorage(filePath);
+        }
+        
+        // Hapus metadata dari Firestore
+        await db.collection('dokumen').doc(dokumenId).delete();
+        
+        return { success: true };
+    } catch (error) {
+        console.error('Delete dokumen error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Realtime listener untuk dokumen
+function listenToDokumen() {
+    if (!firebaseReady) return;
+    
+    unsubscribeDokumen = db.collection('dokumen')
+        .orderBy('createdAt', 'desc')
+        .onSnapshot((snapshot) => {
+            dokumenData = [];
+            snapshot.forEach(doc => {
+                dokumenData.push({ id: doc.id, ...doc.data() });
+            });
+            
+            // Update UI
+            if (document.getElementById('dokumenGrid')) {
+                renderDokumenGrid();
+            }
+            updateDashboardStats();
+        }, (error) => {
+            console.error('Listen dokumen error:', error);
+        });
+}
+
+// ========================================
+// LOCAL STORAGE FALLBACK
+// ========================================
+function saveToLocalStorage(data) {
+    suratData.push(data);
+    localStorage.setItem('corsecSuratData', JSON.stringify(suratData));
+    return { success: true, id: data.id };
+}
+
+function loadFromLocalStorage() {
+    const savedSurat = localStorage.getItem('corsecSuratData');
+    if (savedSurat) {
+        suratData = JSON.parse(savedSurat);
+    }
+    
+    const savedDokumen = localStorage.getItem('corsecDokumenData');
+    if (savedDokumen) {
+        dokumenData = JSON.parse(savedDokumen);
+    }
+    
+    const savedCounters = localStorage.getItem('corsecNomorCounters');
+    if (savedCounters) {
+        nomorCounters = JSON.parse(savedCounters);
+    }
+}
+
+// ========================================
+// CLEANUP RESOURCES
+// ========================================
 function cleanupResources() {
     // Clear all chart timeouts
     Object.values(chartTimeouts).forEach(clearTimeout);
@@ -131,7 +408,7 @@ function cleanupResources() {
         autoSaveInterval = null;
     }
     
-    // Destroy dashboard chart safely
+    // Destroy dashboard chart
     try {
         if (window.monthlyChart instanceof Chart) window.monthlyChart.destroy();
     } catch(e) {
@@ -139,274 +416,174 @@ function cleanupResources() {
     }
 }
 
-function loadFromStorage() {
-    const savedSurat = localStorage.getItem('corsecSuratData');
-    if (savedSurat) {
-        suratData = JSON.parse(savedSurat);
-    } else {
-        loadSampleData();
-    }
+// ========================================
+// INITIALIZE APPLICATION
+// ========================================
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Firebase first
+    initFirebase();
     
-    const savedDokumen = localStorage.getItem('corsecDokumenData');
-    if (savedDokumen) {
-        dokumenData = JSON.parse(savedDokumen);
-    }
+    // Load from localStorage as fallback
+    loadFromLocalStorage();
     
-    const savedCounters = localStorage.getItem('corsecNomorCounters');
-    if (savedCounters) {
-        nomorCounters = JSON.parse(savedCounters);
-    }
-}
-
-function saveToStorage() {
-    localStorage.setItem('corsecSuratData', JSON.stringify(suratData));
-    localStorage.setItem('corsecDokumenData', JSON.stringify(dokumenData));
-    localStorage.setItem('corsecNomorCounters', JSON.stringify(nomorCounters));
-}
-
-function loadSampleData() {
-    const now = Date.now();
-    // Sample data dengan format penomoran Bank Sulselbar yang benar
-    suratData = [
-        {
-            id: now,
-            nomor: 'SR/001/B/DCS/XII/25',
-            jenis: 'Surat Biasa',
-            divisi: 'Corporate Secretary',
-            sifat: 'Biasa',
-            tanggal: '2025-12-18',
-            kepada: 'Direktur Utama Bank Sulselbar',
-            perihal: 'Laporan Pelaksanaan Rapat Umum Pemegang Saham Tahunan (RUPST) 2025',
-            lampiran: '3 (Tiga) Berkas',
-            tembusan: 'Arsip',
-            status: 'Selesai',
-            files: [],
-            createdAt: new Date().toISOString(),
-            createdBy: 'Safirah Wardinah Irianto'
-        },
-        {
-            id: now + 1,
-            nomor: 'SK/001/DIR/XII/2025',
-            jenis: 'Surat Keputusan',
-            divisi: 'Direksi',
-            sifat: 'Segera',
-            tanggal: '2025-12-17',
-            kepada: 'Seluruh Pegawai Bank Sulselbar',
-            perihal: 'Pemberian Penghargaan Masa Kerja Kepada Pegawai PT Bank Sulselbar',
-            lampiran: '1 (Satu) Lampiran',
-            tembusan: 'Divisi Human Capital',
-            status: 'Selesai',
-            files: [],
-            createdAt: new Date().toISOString(),
-            createdBy: 'Safirah Wardinah Irianto'
-        },
-        {
-            id: now + 2,
-            nomor: 'MM/0001/DCS/XII/2025',
-            jenis: 'Memo Corsec',
-            divisi: 'Corporate Secretary',
-            sifat: 'Biasa',
-            tanggal: '2025-12-16',
-            kepada: 'Divisi Human Capital',
-            perihal: 'Pemberitahuan Jadwal Libur Akhir Tahun 2025',
-            lampiran: '-',
-            tembusan: 'Arsip',
-            status: 'Proses',
-            files: [],
-            createdAt: new Date().toISOString(),
-            createdBy: 'Safirah Wardinah Irianto'
-        },
-        {
-            id: now + 3,
-            nomor: 'SR/001/R/DCS/XII/25',
-            jenis: 'Surat Rahasia',
-            divisi: 'Corporate Secretary',
-            sifat: 'Rahasia',
-            tanggal: '2025-12-15',
-            kepada: 'Dewan Komisaris',
-            perihal: 'Tanggapan Surat OJK & Usulan Agenda Tambahan RUPS LB',
-            lampiran: '2 (Dua) Dokumen',
-            tembusan: 'Arsip',
-            status: 'Draft',
-            files: [],
-            createdAt: new Date().toISOString(),
-            createdBy: 'Safirah Wardinah Irianto'
-        },
-        {
-            id: now + 4,
-            nomor: 'SE/001/DIR/XII/2025',
-            jenis: 'Surat Edaran',
-            divisi: 'Direksi',
-            sifat: 'Biasa',
-            tanggal: '2025-12-14',
-            kepada: 'Seluruh Karyawan Bank Sulselbar',
-            perihal: 'Tata Cara Penggunaan Aplikasi CORSEC LENS',
-            lampiran: '1 (Satu) Panduan',
-            tembusan: 'Arsip',
-            status: 'Selesai',
-            files: [],
-            createdAt: new Date().toISOString(),
-            createdBy: 'Safirah Wardinah Irianto'
-        },
-        {
-            id: now + 5,
-            nomor: '001/PKS-BSSB/DJS/XII/2025',
-            jenis: 'PKS',
-            divisi: 'Divisi Jasa',
-            sifat: 'Biasa',
-            tanggal: '2025-12-13',
-            kepada: 'PT Airport Lounge Indonesia',
-            perihal: 'Perjanjian Penggunaan Fasilitas Airport Lounge',
-            lampiran: '5 (Lima) Dokumen',
-            tembusan: 'Divisi Legal',
-            status: 'Selesai',
-            files: [],
-            createdAt: new Date().toISOString(),
-            createdBy: 'Safirah Wardinah Irianto'
+    // Check session
+    const session = localStorage.getItem('corsecSession');
+    if (session) {
+        currentUser = JSON.parse(session);
+        showMainApp();
+        
+        // Start realtime listeners if Firebase ready
+        if (firebaseReady) {
+            listenToSurat();
+            listenToDokumen();
         }
-    ];
+    }
     
-    // Counter dengan format baru
-    nomorCounters = {
-        'Surat Biasa': 2,
-        'Surat Rahasia': 2,
-        'Surat Keputusan': 2,
-        'Surat Edaran': 2,
-        'Memo Direksi': 1,
-        'Memo Corsec': 2,
-        'PKS': 2,
-        'MoU': 1,
-        'Notulen Radir': 1,
-        'Surat Tugas': 1,
-        'Surat Undangan': 1,
-        'Nota Dinas': 1
-    };
+    // Setup event listeners
+    setupEventListeners();
+});
+
+function setupEventListeners() {
+    // Login form
+    var loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
     
-    saveToStorage();
+    // Surat form
+    var suratForm = document.getElementById('suratForm');
+    if (suratForm) {
+        suratForm.addEventListener('submit', handleCreateSurat);
+    }
+    
+    // Logout button
+    var logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleLogout);
+    }
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', cleanupResources);
 }
 
 // ========================================
-// AUTHENTICATION
+// LOGIN / LOGOUT
 // ========================================
-function handleLogin(event) {
+async function handleLogin(event) {
     event.preventDefault();
     
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('password').value;
-    const rememberMe = document.getElementById('rememberMe').checked;
+    var username = document.getElementById('username').value;
+    var password = document.getElementById('password').value;
+    var remember = document.getElementById('remember').checked;
     
-    const user = userAccounts.find(u => 
-        u.username.toLowerCase() === username.toLowerCase() && 
-        u.password === password
-    );
+    // Show loading
+    var loginBtn = document.querySelector('#loginForm button[type="submit"]');
+    var originalText = loginBtn.innerHTML;
+    loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
+    loginBtn.disabled = true;
     
-    if (user) {
-        currentUser = {
-            username: user.username,
-            name: user.name,
-            nip: user.nip,
-            role: user.role,
-            division: user.division,
-            loginTime: new Date().toISOString()
-        };
+    // Try Firebase login first
+    if (firebaseReady) {
+        var email = username.includes('@') ? username : username + '@banksulselbar.co.id';
+        var result = await firebaseLogin(email, password);
         
-        if (rememberMe) {
+        if (result.success) {
+            currentUser = result.user;
+            
+            if (remember) {
+                localStorage.setItem('corsecSession', JSON.stringify(currentUser));
+            }
+            
+            showToast('success', 'Login Berhasil', 'Selamat datang, ' + (currentUser.name || username));
+            showMainApp();
+            
+            // Start realtime listeners
+            listenToSurat();
+            listenToDokumen();
+            
+            loginBtn.innerHTML = originalText;
+            loginBtn.disabled = false;
+            return;
+        }
+    }
+    
+    // Fallback: Demo login
+    var demoUsers = {
+        'safirah': { password: 'corsec2025', name: 'Safirah Wardinah Irianto', role: 'Asisten Administrasi' },
+        'hartani': { password: 'pemimpin2025', name: 'Hartani Syamsuddin', role: 'Pemimpin DCS' },
+        'admin': { password: 'admin123', name: 'Administrator', role: 'Admin' }
+    };
+    
+    if (demoUsers[username] && demoUsers[username].password === password) {
+        currentUser = { username: username, ...demoUsers[username] };
+        
+        if (remember) {
             localStorage.setItem('corsecSession', JSON.stringify(currentUser));
-        } else {
-            sessionStorage.setItem('corsecSession', JSON.stringify(currentUser));
         }
         
-        showToast('success', 'Login Berhasil', 'Selamat datang, ' + user.name + '!');
+        showToast('success', 'Login Berhasil', 'Selamat datang, ' + currentUser.name);
+        showMainApp();
         
-        setTimeout(function() {
-            showApp();
-        }, 500);
+        // Load sample data if empty
+        if (suratData.length === 0) {
+            loadSampleData();
+        }
     } else {
-        showToast('error', 'Login Gagal', 'Username atau password salah!');
-        document.getElementById('password').value = '';
+        showToast('error', 'Login Gagal', 'Username atau password salah');
     }
-}
-
-function handleLogout() {
-    if (confirm('Apakah Anda yakin ingin keluar?')) {
-        // BUG FIX: Cleanup semua resources saat logout
-        cleanupResources();
-        
-        currentUser = null;
-        localStorage.removeItem('corsecSession');
-        sessionStorage.removeItem('corsecSession');
-        
-        document.getElementById('appContainer').style.display = 'none';
-        document.getElementById('loginPage').style.display = 'flex';
-        document.getElementById('loginForm').reset();
-        
-        showToast('info', 'Logout', 'Anda telah keluar dari sistem');
-    }
-}
-
-function showApp() {
-    document.getElementById('loginPage').style.display = 'none';
-    document.getElementById('appContainer').style.display = 'flex';
-    updateUserInfo();
-    navigateTo('dashboard');
-}
-
-function updateUserInfo() {
-    if (currentUser) {
-        var displayName = document.getElementById('userDisplayName');
-        var userRole = document.getElementById('userRole');
-        var headerUserName = document.getElementById('headerUserName');
-        var welcomeName = document.getElementById('welcomeName');
-        
-        if (displayName) displayName.textContent = currentUser.name;
-        if (userRole) userRole.textContent = currentUser.role;
-        if (headerUserName) {
-            var names = currentUser.name.split(' ');
-            headerUserName.textContent = names[0] + (names[1] ? ' ' + names[1].charAt(0) + '.' : '');
-        }
-        if (welcomeName) welcomeName.textContent = currentUser.name.split(' ')[0];
-    }
-}
-
-function togglePassword() {
-    var passwordInput = document.getElementById('password');
-    var eyeIcon = document.getElementById('eyeIcon');
     
-    if (passwordInput.type === 'password') {
-        passwordInput.type = 'text';
-        eyeIcon.classList.remove('fa-eye');
-        eyeIcon.classList.add('fa-eye-slash');
-    } else {
-        passwordInput.type = 'password';
-        eyeIcon.classList.remove('fa-eye-slash');
-        eyeIcon.classList.add('fa-eye');
+    loginBtn.innerHTML = originalText;
+    loginBtn.disabled = false;
+}
+
+async function handleLogout() {
+    // Cleanup resources
+    cleanupResources();
+    
+    // Firebase logout
+    if (firebaseReady) {
+        await firebaseLogout();
     }
+    
+    // Clear session
+    localStorage.removeItem('corsecSession');
+    currentUser = null;
+    
+    // Show login page
+    document.getElementById('loginPage').style.display = 'flex';
+    document.getElementById('mainApp').style.display = 'none';
+    
+    showToast('info', 'Logout', 'Anda telah keluar dari sistem');
+}
+
+function showMainApp() {
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'flex';
+    
+    // Update user info
+    var userName = document.getElementById('userName');
+    var userRole = document.getElementById('userRole');
+    if (userName) userName.textContent = currentUser.name || currentUser.username || 'User';
+    if (userRole) userRole.textContent = currentUser.role || 'Staff';
+    
+    // Initialize
+    navigateTo('dashboard');
+    setupDragAndDrop();
 }
 
 // ========================================
 // NAVIGATION
 // ========================================
 function navigateTo(pageName) {
-    // BUG FIX: Clear previous timeouts sebelum navigasi
+    // Clear pending timeouts
     Object.values(chartTimeouts).forEach(clearTimeout);
     chartTimeouts = {};
     
-    // BUG FIX: Clear upload intervals saat meninggalkan halaman upload
-    uploadIntervals.forEach(clearInterval);
-    uploadIntervals = [];
-    
-    var pages = document.querySelectorAll('.page');
-    pages.forEach(function(page) {
-        page.style.display = 'none';
-    });
-    
-    var navItems = document.querySelectorAll('.nav-item');
-    navItems.forEach(function(item) {
-        item.classList.remove('active');
-        if (item.getAttribute('data-page') === pageName) {
-            item.classList.add('active');
-        }
-    });
+    // Clear upload intervals when leaving upload page
+    if (pageName !== 'upload-dokumen') {
+        uploadIntervals.forEach(clearInterval);
+        uploadIntervals = [];
+    }
     
     var pageMap = {
         'dashboard': 'dashboardPage',
@@ -419,14 +596,6 @@ function navigateTo(pageName) {
         'pengaturan': 'pengaturanPage'
     };
     
-    var pageId = pageMap[pageName];
-    if (pageId) {
-        var pageElement = document.getElementById(pageId);
-        if (pageElement) {
-            pageElement.style.display = 'block';
-        }
-    }
-    
     var titleMap = {
         'dashboard': 'Dashboard',
         'buat-surat': 'Buat Surat Baru',
@@ -438,17 +607,36 @@ function navigateTo(pageName) {
         'pengaturan': 'Pengaturan'
     };
     
+    // Hide all pages
+    document.querySelectorAll('.page').forEach(function(page) {
+        page.style.display = 'none';
+    });
+    
+    // Show target page
+    var targetPage = document.getElementById(pageMap[pageName]);
+    if (targetPage) {
+        targetPage.style.display = 'block';
+    }
+    
+    // Update nav active state
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+        item.classList.remove('active');
+        if (item.dataset.page === pageName) {
+            item.classList.add('active');
+        }
+    });
+    
+    // Update page title
     var pageTitle = document.getElementById('pageTitle');
-    var breadcrumbCurrent = document.getElementById('breadcrumbCurrent');
+    if (pageTitle) {
+        pageTitle.textContent = titleMap[pageName] || 'CORSEC LENS';
+    }
     
-    if (pageTitle) pageTitle.textContent = titleMap[pageName] || 'Dashboard';
-    if (breadcrumbCurrent) breadcrumbCurrent.textContent = titleMap[pageName] || 'Dashboard';
-    
+    // Page-specific init
     switch(pageName) {
         case 'dashboard':
             updateDashboardStats();
             renderActivityList();
-            // BUG FIX: Track timeout untuk bisa di-cancel
             chartTimeouts.dashboard = setTimeout(initCharts, 100);
             break;
         case 'daftar-surat':
@@ -466,6 +654,7 @@ function navigateTo(pageName) {
             break;
     }
     
+    // Close sidebar on mobile
     if (window.innerWidth <= 1024) {
         var sidebar = document.getElementById('sidebar');
         if (sidebar) sidebar.classList.remove('active');
@@ -480,82 +669,62 @@ function toggleSidebar() {
 // ========================================
 // DASHBOARD
 // ========================================
-function updateCurrentDate() {
-    var options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-    var dateStr = new Date().toLocaleDateString('id-ID', options);
-    var dateElement = document.getElementById('currentDate');
-    if (dateElement) {
-        dateElement.textContent = dateStr;
-    }
-}
-
 function updateDashboardStats() {
     var totalSurat = suratData.length;
-    var suratSelesai = suratData.filter(function(s) { return s.status === 'Selesai'; }).length;
-    var suratProses = suratData.filter(function(s) { return s.status === 'Proses' || s.status === 'Draft'; }).length;
+    var selesai = suratData.filter(function(s) { return s.status === 'Selesai'; }).length;
+    var proses = suratData.filter(function(s) { return s.status === 'Proses' || s.status === 'Draft'; }).length;
     var totalDokumen = dokumenData.length;
     
-    animateCounter('totalSurat', totalSurat);
-    animateCounter('suratSelesai', suratSelesai);
-    animateCounter('suratProses', suratProses);
-    animateCounter('totalDokumen', totalDokumen);
-    
-    var suratCount = document.getElementById('suratCount');
-    var arsipCount = document.getElementById('arsipCount');
-    if (suratCount) suratCount.textContent = totalSurat;
-    if (arsipCount) arsipCount.textContent = totalDokumen;
+    animateCounter('statTotalSurat', totalSurat);
+    animateCounter('statSelesai', selesai);
+    animateCounter('statProses', proses);
+    animateCounter('statDokumen', totalDokumen);
 }
 
 function animateCounter(elementId, target) {
     var element = document.getElementById(elementId);
     if (!element) return;
     
-    // BUG FIX: Clear interval lama sebelum membuat baru
+    // Clear previous interval
     if (counterIntervals[elementId]) {
         clearInterval(counterIntervals[elementId]);
         delete counterIntervals[elementId];
     }
     
-    // Jika target 0, langsung set tanpa animasi
-    if (target === 0) {
-        element.textContent = '0';
-        return;
-    }
-    
     var current = 0;
-    var increment = target / 50;
+    var increment = Math.ceil(target / 30);
+    var duration = 500;
+    var stepTime = duration / 30;
+    
     counterIntervals[elementId] = setInterval(function() {
         current += increment;
         if (current >= target) {
-            element.textContent = target;
+            current = target;
             clearInterval(counterIntervals[elementId]);
             delete counterIntervals[elementId];
-        } else {
-            element.textContent = Math.floor(current);
         }
-    }, 20);
+        element.textContent = current;
+    }, stepTime);
 }
 
 function renderActivityList() {
     var activityList = document.getElementById('activityList');
     if (!activityList) return;
     
-    var recentSurat = suratData.slice().sort(function(a, b) {
-        return new Date(b.createdAt) - new Date(a.createdAt);
-    }).slice(0, 5);
+    var recentSurat = suratData.slice(0, 5);
     
     if (recentSurat.length === 0) {
-        activityList.innerHTML = '<div style="padding: 30px; text-align: center; color: #999;"><i class="fas fa-inbox" style="font-size: 48px; margin-bottom: 10px; display: block;"></i>Belum ada aktivitas</div>';
+        activityList.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i><p>Belum ada aktivitas</p></div>';
         return;
     }
     
     var html = '';
     recentSurat.forEach(function(surat) {
-        html += '<div class="activity-item" style="cursor: pointer;" onclick="viewSuratDetail(' + surat.id + ')">';
+        html += '<div class="activity-item">';
         html += '<div class="activity-icon create"><i class="fas fa-file-alt"></i></div>';
         html += '<div class="activity-content">';
         html += '<h4>' + surat.nomor + '</h4>';
-        html += '<p>' + surat.perihal.substring(0, 50) + (surat.perihal.length > 50 ? '...' : '') + '</p>';
+        html += '<p>' + (surat.perihal ? surat.perihal.substring(0, 50) + (surat.perihal.length > 50 ? '...' : '') : '-') + '</p>';
         html += '</div></div>';
     });
     
@@ -563,34 +732,23 @@ function renderActivityList() {
 }
 
 // ========================================
-// CHART HELPER - Destroy dan Clear Canvas
+// CHART
 // ========================================
-function destroyChart(chartInstance, canvasElement) {
-    if (chartInstance instanceof Chart) {
-        chartInstance.destroy();
-    }
-    if (canvasElement) {
-        var ctx = canvasElement.getContext('2d');
-        ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    }
-    return null;
-}
-
 function initCharts() {
     var canvas = document.getElementById('monthlyChart');
     if (!canvas || typeof Chart === 'undefined') return;
     
-    // Destroy chart lama
+    // Destroy old chart
     if (window.monthlyChart instanceof Chart) {
         window.monthlyChart.destroy();
         window.monthlyChart = null;
     }
     
-    // RESET: Ganti canvas dengan yang baru untuk reset ukuran
+    // Replace canvas to reset size
     var parent = canvas.parentNode;
     var newCanvas = document.createElement('canvas');
     newCanvas.id = 'monthlyChart';
-    parent.innerHTML = '';  // Clear parent
+    parent.innerHTML = '';
     parent.appendChild(newCanvas);
     
     window.monthlyChart = new Chart(newCanvas, {
@@ -620,9 +778,11 @@ function getMonthlyData() {
     var currentYear = new Date().getFullYear();
     
     suratData.forEach(function(surat) {
-        var date = new Date(surat.tanggal);
-        if (date.getFullYear() === currentYear) {
-            monthlyCount[date.getMonth()]++;
+        if (surat.tanggal) {
+            var date = new Date(surat.tanggal);
+            if (date.getFullYear() === currentYear) {
+                monthlyCount[date.getMonth()]++;
+            }
         }
     });
     
@@ -630,8 +790,74 @@ function getMonthlyData() {
 }
 
 // ========================================
-// SURAT MANAGEMENT
+// NOMOR SURAT GENERATOR
 // ========================================
+function getBulanRomawi(month) {
+    var romawi = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+    return romawi[month] || 'I';
+}
+
+async function generateNomorSurat(jenis, divisi) {
+    var now = new Date();
+    var year = now.getFullYear();
+    var year2digit = String(year).slice(-2);
+    var monthIndex = now.getMonth();
+    var bulanRomawi = getBulanRomawi(monthIndex);
+    
+    // Get counter from Firebase or localStorage
+    var counterValue = await getNomorCounter(jenis);
+    var nextCounter = counterValue + 1;
+    
+    var counter3 = String(nextCounter).padStart(3, '0');
+    var counter4 = String(nextCounter).padStart(4, '0');
+    
+    var kodeDivisi = {
+        'Corporate Secretary': 'DCS',
+        'Direksi': 'DIR',
+        'Divisi Human Capital': 'DHC',
+        'Divisi Jasa': 'DJS',
+        'Divisi Dana & Layanan': 'DDL',
+        'Divisi Retail & Kredit': 'DRK',
+        'Divisi Kredit Korporasi': 'DKK',
+        'Divisi Kepatuhan': 'DKP',
+        'Divisi Internasional & Business': 'DIB',
+        'Divisi Umum': 'DUM',
+        'SIMO': 'SIMO',
+        'Manajemen Risiko': 'SKMR'
+    };
+    
+    var kode = kodeDivisi[divisi] || 'DCS';
+    
+    switch(jenis) {
+        case 'Surat Biasa':
+            return 'SR/' + counter3 + '/B/' + kode + '/' + bulanRomawi + '/' + year2digit;
+        case 'Surat Rahasia':
+            return 'SR/' + counter3 + '/R/' + kode + '/' + bulanRomawi + '/' + year2digit;
+        case 'Surat Keputusan':
+            return 'SK/' + counter3 + '/DIR/' + bulanRomawi + '/' + year;
+        case 'Surat Edaran':
+            return 'SE/' + counter3 + '/DIR/' + bulanRomawi + '/' + year;
+        case 'Memo Direksi':
+            return 'MM/' + counter4 + '/DIR/' + bulanRomawi + '/' + year;
+        case 'Memo Corsec':
+            return 'MM/' + counter4 + '/DCS/' + bulanRomawi + '/' + year;
+        case 'PKS':
+            return counter3 + '/PKS-BSSB/' + kode + '/' + bulanRomawi + '/' + year;
+        case 'MoU':
+            return counter3 + '/MOU-BSSB/' + bulanRomawi + '/' + year;
+        case 'Notulen Radir':
+            return counter3 + '/RADIR/' + kode + '/' + bulanRomawi + '/' + year;
+        case 'Surat Tugas':
+            return 'ST/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
+        case 'Surat Undangan':
+            return 'UND/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
+        case 'Nota Dinas':
+            return 'ND/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
+        default:
+            return 'SR/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
+    }
+}
+
 function initializeDateInputs() {
     var today = new Date().toISOString().split('T')[0];
     
@@ -647,116 +873,25 @@ function initializeDateInputs() {
     }
 }
 
-function updateNomorPreview() {
+async function updateNomorPreview() {
     var jenisEl = document.getElementById('jenisSurat');
     var divisiEl = document.getElementById('divisiSurat');
     var nomorPreview = document.getElementById('nomorPreview');
     
     if (nomorPreview) {
         if (jenisEl && divisiEl && jenisEl.value && divisiEl.value) {
-            nomorPreview.textContent = generateNomorSurat(jenisEl.value, divisiEl.value);
+            var nomor = await generateNomorSurat(jenisEl.value, divisiEl.value);
+            nomorPreview.textContent = nomor;
         } else {
-            nomorPreview.textContent = '-/---/---/--/----';
+            nomorPreview.textContent = 'SR/001/B/DCS/XII/25';
         }
     }
 }
 
 // ========================================
-// FUNGSI KONVERSI BULAN KE ROMAWI
+// CREATE SURAT
 // ========================================
-function getBulanRomawi(month) {
-    var romawi = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
-    return romawi[month] || 'I';
-}
-
-// ========================================
-// GENERATE NOMOR SURAT - FORMAT BANK SULSELBAR
-// ========================================
-function generateNomorSurat(jenis, divisi, sifat) {
-    var now = new Date();
-    var year = now.getFullYear();
-    var year2digit = String(year).slice(-2);
-    var monthIndex = now.getMonth();
-    var bulanRomawi = getBulanRomawi(monthIndex);
-    
-    var counter3 = String(nomorCounters[jenis] || 1).padStart(3, '0');
-    var counter4 = String(nomorCounters[jenis] || 1).padStart(4, '0');
-    
-    // Kode divisi sesuai standar Bank Sulselbar
-    var kodeDivisi = {
-        'Corporate Secretary': 'DCS',
-        'Divisi Human Capital': 'DHC',
-        'Divisi Jasa': 'DJS',
-        'Divisi Dana & Layanan': 'DDL',
-        'Divisi Retail & Kredit': 'DRK',
-        'Divisi Kredit Korporasi': 'DKK',
-        'Divisi Kepatuhan': 'DKP',
-        'Divisi Internasional & Business': 'DIB',
-        'Divisi Umum': 'DUM',
-        'SIMO': 'SIMO',
-        'Manajemen Risiko': 'SKMR',
-        'Direksi': 'DIR'
-    };
-    
-    var kode = kodeDivisi[divisi] || 'DCS';
-    
-    // Format nomor berdasarkan jenis surat (sesuai Excel Penomoran 2025)
-    switch(jenis) {
-        case 'Surat Biasa':
-            // Format: SR/{counter}/B/DCS/{bulan}/{tahun_2digit}
-            return 'SR/' + counter3 + '/B/' + kode + '/' + bulanRomawi + '/' + year2digit;
-            
-        case 'Surat Rahasia':
-            // Format: SR/{counter}/R/DCS/{bulan}/{tahun_2digit}
-            return 'SR/' + counter3 + '/R/' + kode + '/' + bulanRomawi + '/' + year2digit;
-            
-        case 'Surat Keputusan':
-            // Format: SK/{counter}/DIR/{bulan}/{tahun}
-            return 'SK/' + counter3 + '/DIR/' + bulanRomawi + '/' + year;
-            
-        case 'Surat Edaran':
-            // Format: SE/{counter}/DIR/{bulan}/{tahun}
-            return 'SE/' + counter3 + '/DIR/' + bulanRomawi + '/' + year;
-            
-        case 'Memo Direksi':
-            // Format: MM/{counter_4digit}/DIR/{bulan}/{tahun}
-            return 'MM/' + counter4 + '/DIR/' + bulanRomawi + '/' + year;
-            
-        case 'Memo Corsec':
-            // Format: MM/{counter_4digit}/DCS/{bulan}/{tahun}
-            return 'MM/' + counter4 + '/DCS/' + bulanRomawi + '/' + year;
-            
-        case 'PKS':
-            // Format: {counter}/PKS-BSSB/{divisi}/{bulan}/{tahun}
-            return counter3 + '/PKS-BSSB/' + kode + '/' + bulanRomawi + '/' + year;
-            
-        case 'MoU':
-            // Format: {counter}/MOU-BSSB/{bulan}/{tahun}
-            return counter3 + '/MOU-BSSB/' + bulanRomawi + '/' + year;
-            
-        case 'Notulen Radir':
-            // Format: {counter}/RADIR/{divisi}/{bulan}/{tahun}
-            return counter3 + '/RADIR/' + kode + '/' + bulanRomawi + '/' + year;
-            
-        case 'Surat Tugas':
-            // Format: ST/{counter}/DCS/{bulan}/{tahun}
-            return 'ST/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
-            
-        case 'Surat Undangan':
-            // Format: UND/{counter}/DCS/{bulan}/{tahun}
-            return 'UND/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
-            
-        case 'Nota Dinas':
-            // Format: ND/{counter}/DCS/{bulan}/{tahun}
-            return 'ND/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
-            
-        default:
-            // Default format
-            return 'SR/' + counter3 + '/' + kode + '/' + bulanRomawi + '/' + year;
-    }
-}
-
-function handleCreateSurat(event) {
+async function handleCreateSurat(event) {
     event.preventDefault();
     
     var jenis = document.getElementById('jenisSurat').value;
@@ -773,306 +908,235 @@ function handleCreateSurat(event) {
         return;
     }
     
-    var nomor = generateNomorSurat(jenis, divisi);
+    // Show loading
+    var submitBtn = document.querySelector('#suratForm button[type="submit"]');
+    var originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menyimpan...';
+    submitBtn.disabled = true;
     
-    var newSurat = {
-        id: Date.now(),
-        nomor: nomor,
-        jenis: jenis,
-        divisi: divisi,
-        sifat: sifat,
-        tanggal: tanggal,
-        kepada: kepada,
-        perihal: perihal,
-        lampiran: lampiran,
-        tembusan: tembusan,
-        status: 'Selesai',
-        files: uploadedFiles.slice(),
-        createdAt: new Date().toISOString(),
-        createdBy: currentUser ? currentUser.name : 'System'
-    };
+    try {
+        // Generate nomor
+        var nomor = await generateNomorSurat(jenis, divisi);
+        
+        // Upload files if any
+        var fileUrls = [];
+        if (uploadedFiles.length > 0) {
+            for (var file of uploadedFiles) {
+                var path = 'surat/' + nomor.replace(/\//g, '-') + '/' + Date.now() + '_' + file.name;
+                var uploadResult = await uploadFileToStorage(file, path);
+                if (uploadResult.success) {
+                    fileUrls.push({
+                        name: file.name,
+                        url: uploadResult.url,
+                        path: uploadResult.path,
+                        size: file.size,
+                        type: file.type
+                    });
+                }
+            }
+        }
+        
+        var newSurat = {
+            nomor: nomor,
+            jenis: jenis,
+            divisi: divisi,
+            sifat: sifat,
+            tanggal: tanggal,
+            kepada: kepada,
+            perihal: perihal,
+            lampiran: lampiran,
+            tembusan: tembusan,
+            status: 'Draft',
+            files: fileUrls,
+            createdBy: currentUser ? (currentUser.name || currentUser.username) : 'User'
+        };
+        
+        // Save to Firebase
+        var result = await saveSuratToFirebase(newSurat);
+        
+        if (result.success) {
+            // Increment counter
+            await incrementNomorCounter(jenis);
+            
+            showToast('success', 'Berhasil', 'Surat ' + nomor + ' berhasil dibuat');
+            
+            // Reset form
+            document.getElementById('suratForm').reset();
+            uploadedFiles = [];
+            var fileList = document.getElementById('fileList');
+            if (fileList) fileList.innerHTML = '';
+            
+            initializeDateInputs();
+            updateNomorPreview();
+            
+            // Navigate to list
+            navigateTo('daftar-surat');
+        } else {
+            showToast('error', 'Error', 'Gagal menyimpan surat: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Create surat error:', error);
+        showToast('error', 'Error', 'Terjadi kesalahan: ' + error.message);
+    }
     
-    suratData.unshift(newSurat);
-    nomorCounters[jenis]++;
-    saveToStorage();
-    
-    showToast('success', 'Surat Berhasil Dibuat', 'Nomor: ' + nomor);
-    resetForm();
-    
-    setTimeout(function() {
-        navigateTo('daftar-surat');
-    }, 1000);
-}
-
-function resetForm() {
-    var form = document.getElementById('suratForm');
-    if (form) form.reset();
-    uploadedFiles = [];
-    var fileList = document.getElementById('fileList');
-    if (fileList) fileList.innerHTML = '';
-    initializeDateInputs();
-    updateNomorPreview();
-}
-
-function saveDraft() {
-    showToast('info', 'Draft Disimpan', 'Surat disimpan sebagai draft');
+    submitBtn.innerHTML = originalText;
+    submitBtn.disabled = false;
 }
 
 // ========================================
 // SURAT TABLE
 // ========================================
 function renderSuratTable() {
-    var tbody = document.getElementById('suratTableBody');
-    if (!tbody) return;
+    var tableBody = document.getElementById('suratTableBody');
+    if (!tableBody) return;
     
-    var searchEl = document.getElementById('searchSurat');
-    var filterJenisEl = document.getElementById('filterJenis');
-    var filterStatusEl = document.getElementById('filterStatus');
+    var search = document.getElementById('searchSurat');
+    var filterJenis = document.getElementById('filterJenis');
+    var filterStatus = document.getElementById('filterStatus');
     
-    var searchTerm = searchEl ? searchEl.value.toLowerCase() : '';
-    var filterJenis = filterJenisEl ? filterJenisEl.value : '';
-    var filterStatus = filterStatusEl ? filterStatusEl.value : '';
+    var searchValue = search ? search.value.toLowerCase() : '';
+    var jenisValue = filterJenis ? filterJenis.value : '';
+    var statusValue = filterStatus ? filterStatus.value : '';
     
-    var filteredData = suratData.filter(function(surat) {
-        var match = true;
-        if (searchTerm) {
-            match = surat.nomor.toLowerCase().indexOf(searchTerm) > -1 ||
-                    surat.perihal.toLowerCase().indexOf(searchTerm) > -1 ||
-                    surat.kepada.toLowerCase().indexOf(searchTerm) > -1;
-        }
-        if (filterJenis) match = match && surat.jenis === filterJenis;
-        if (filterStatus) match = match && surat.status === filterStatus;
-        return match;
+    var filtered = suratData.filter(function(surat) {
+        var matchSearch = !searchValue || 
+            (surat.nomor && surat.nomor.toLowerCase().includes(searchValue)) || 
+            (surat.perihal && surat.perihal.toLowerCase().includes(searchValue));
+        var matchJenis = !jenisValue || surat.jenis === jenisValue;
+        var matchStatus = !statusValue || surat.status === statusValue;
+        return matchSearch && matchJenis && matchStatus;
     });
     
-    if (filteredData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 50px;"><i class="fas fa-inbox" style="font-size: 48px; color: #ccc; display: block; margin-bottom: 15px;"></i><p style="color: #999;">Tidak ada data surat</p></td></tr>';
+    if (filtered.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="7" class="empty-table"><i class="fas fa-inbox"></i><p>Tidak ada data surat</p></td></tr>';
         return;
     }
     
-    var startIndex = (currentPage - 1) * itemsPerPage;
-    var paginatedData = filteredData.slice(startIndex, startIndex + itemsPerPage);
-    
     var html = '';
-    paginatedData.forEach(function(surat, index) {
+    filtered.forEach(function(surat, index) {
+        var statusClass = surat.status === 'Selesai' ? 'success' : (surat.status === 'Proses' ? 'warning' : 'info');
         html += '<tr>';
-        html += '<td>' + (startIndex + index + 1) + '</td>';
-        html += '<td class="nomor-surat">' + surat.nomor + '</td>';
-        html += '<td>' + formatDate(surat.tanggal) + '</td>';
-        html += '<td>' + surat.jenis + '</td>';
-        html += '<td title="' + surat.perihal + '">' + surat.perihal.substring(0, 40) + (surat.perihal.length > 40 ? '...' : '') + '</td>';
-        html += '<td title="' + surat.kepada + '">' + surat.kepada.substring(0, 30) + (surat.kepada.length > 30 ? '...' : '') + '</td>';
-        html += '<td><span class="badge badge-' + surat.status.toLowerCase() + '">' + surat.status + '</span></td>';
-        html += '<td><div class="action-btns">';
-        html += '<button class="action-btn view" onclick="viewSuratDetail(' + surat.id + ')" title="Lihat Detail"><i class="fas fa-eye"></i></button>';
-        html += '<button class="action-btn edit" onclick="previewSurat(' + surat.id + ')" title="Preview & Print"><i class="fas fa-print"></i></button>';
-        html += '<button class="action-btn download" onclick="downloadSurat(' + surat.id + ')" title="Download"><i class="fas fa-download"></i></button>';
-        html += '<button class="action-btn delete" onclick="deleteSurat(' + surat.id + ')" title="Hapus"><i class="fas fa-trash"></i></button>';
-        html += '</div></td></tr>';
+        html += '<td>' + (index + 1) + '</td>';
+        html += '<td><strong>' + surat.nomor + '</strong></td>';
+        html += '<td>' + (surat.tanggal || '-') + '</td>';
+        html += '<td>' + (surat.jenis || '-') + '</td>';
+        html += '<td>' + (surat.perihal ? surat.perihal.substring(0, 40) + (surat.perihal.length > 40 ? '...' : '') : '-') + '</td>';
+        html += '<td><span class="status-badge ' + statusClass + '">' + (surat.status || 'Draft') + '</span></td>';
+        html += '<td class="actions">';
+        html += '<button class="btn-icon" onclick="viewSurat(\'' + surat.id + '\')" title="Lihat"><i class="fas fa-eye"></i></button>';
+        html += '<button class="btn-icon" onclick="printSurat(\'' + surat.id + '\')" title="Print"><i class="fas fa-print"></i></button>';
+        html += '<button class="btn-icon" onclick="downloadSurat(\'' + surat.id + '\')" title="Download"><i class="fas fa-download"></i></button>';
+        html += '<button class="btn-icon danger" onclick="confirmDeleteSurat(\'' + surat.id + '\')" title="Hapus"><i class="fas fa-trash"></i></button>';
+        html += '</td></tr>';
     });
     
-    tbody.innerHTML = html;
-    renderPagination(filteredData.length);
+    tableBody.innerHTML = html;
 }
 
 function filterSuratList() {
-    currentPage = 1;
     renderSuratTable();
 }
 
-function renderPagination(totalItems) {
-    var pagination = document.getElementById('pagination');
-    if (!pagination) return;
-    
-    var totalPages = Math.ceil(totalItems / itemsPerPage);
-    if (totalPages <= 1) {
-        pagination.innerHTML = '';
-        return;
-    }
-    
-    var html = '<button onclick="goToPage(' + (currentPage - 1) + ')"' + (currentPage === 1 ? ' disabled' : '') + '><i class="fas fa-chevron-left"></i></button>';
-    for (var i = 1; i <= totalPages; i++) {
-        html += '<button onclick="goToPage(' + i + ')" class="' + (i === currentPage ? 'active' : '') + '">' + i + '</button>';
-    }
-    html += '<button onclick="goToPage(' + (currentPage + 1) + ')"' + (currentPage === totalPages ? ' disabled' : '') + '><i class="fas fa-chevron-right"></i></button>';
-    
-    pagination.innerHTML = html;
-}
-
-function goToPage(page) {
-    var totalPages = Math.ceil(suratData.length / itemsPerPage);
-    if (page < 1 || page > totalPages) return;
-    currentPage = page;
-    renderSuratTable();
-}
-
-// ========================================
-// VIEW SURAT DETAIL - FIXED
-// ========================================
-function viewSuratDetail(id) {
-    var surat = suratData.find(function(s) { return s.id === id; });
+function viewSurat(suratId) {
+    var surat = suratData.find(function(s) { return s.id === suratId; });
     if (!surat) {
         showToast('error', 'Error', 'Surat tidak ditemukan');
         return;
     }
     
-    var modal = document.getElementById('detailModal');
-    var modalBody = document.getElementById('modalBody');
-    var modalFooter = document.getElementById('modalFooter');
-    var modalTitle = document.getElementById('modalTitle');
-    
-    if (!modal || !modalBody || !modalFooter) return;
-    
-    if (modalTitle) modalTitle.textContent = 'Detail Surat';
-    
-    var sifatClass = surat.sifat === 'Sangat Segera' ? 'badge-draft' : surat.sifat === 'Segera' ? 'badge-proses' : 'badge-selesai';
-    
-    modalBody.innerHTML = '' +
-        '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">' +
-            '<div><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Nomor Surat</label>' +
-            '<p style="font-size: 20px; font-weight: 700; color: #1B5E9E; font-family: monospace; margin: 0;">' + surat.nomor + '</p></div>' +
-            '<div><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Tanggal</label>' +
-            '<p style="font-size: 16px; color: #333; margin: 0;">' + formatDate(surat.tanggal) + '</p></div>' +
-            '<div><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Jenis Surat</label>' +
-            '<p style="font-size: 16px; color: #333; margin: 0;">' + surat.jenis + '</p></div>' +
-            '<div><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Sifat</label>' +
-            '<span class="badge ' + sifatClass + '" style="font-size: 13px; padding: 6px 14px;">' + surat.sifat + '</span></div>' +
-            '<div><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Status</label>' +
-            '<span class="badge badge-' + surat.status.toLowerCase() + '" style="font-size: 13px; padding: 6px 14px;">' + surat.status + '</span></div>' +
-            '<div><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Divisi</label>' +
-            '<p style="font-size: 16px; color: #333; margin: 0;">' + surat.divisi + '</p></div>' +
-        '</div>' +
-        '<hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">' +
-        '<div style="margin-bottom: 20px;"><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Kepada</label>' +
-        '<p style="font-size: 16px; color: #333; margin: 0; font-weight: 500;">' + surat.kepada + '</p></div>' +
-        '<div style="margin-bottom: 20px;"><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Perihal</label>' +
-        '<div style="background: linear-gradient(135deg, #f8f9fa, #fff); padding: 20px; border-radius: 10px; border-left: 4px solid #1B5E9E;">' +
-        '<p style="font-size: 16px; color: #333; margin: 0; line-height: 1.6;">' + surat.perihal + '</p></div></div>' +
-        '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">' +
-            '<div><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Lampiran</label>' +
-            '<p style="font-size: 16px; color: #333; margin: 0;">' + (surat.lampiran || '-') + '</p></div>' +
-            '<div><label style="font-size: 12px; color: #666; display: block; margin-bottom: 5px; text-transform: uppercase;">Tembusan</label>' +
-            '<p style="font-size: 16px; color: #333; margin: 0;">' + (surat.tembusan || '-') + '</p></div>' +
-        '</div>' +
-        '<hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">' +
-        '<div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">' +
-        '<p style="font-size: 12px; color: #666; margin: 0 0 5px 0;"><i class="fas fa-user" style="width: 16px;"></i> Dibuat oleh: <strong>' + surat.createdBy + '</strong></p>' +
-        '<p style="font-size: 12px; color: #666; margin: 0;"><i class="fas fa-clock" style="width: 16px;"></i> Tanggal dibuat: <strong>' + new Date(surat.createdAt).toLocaleString('id-ID') + '</strong></p></div>';
-    
-    modalFooter.innerHTML = '' +
-        '<button class="btn-secondary" onclick="closeModal(\'detailModal\')"><i class="fas fa-times"></i> Tutup</button>' +
-        '<button class="btn-secondary" onclick="previewSurat(' + surat.id + '); closeModal(\'detailModal\');"><i class="fas fa-print"></i> Preview & Print</button>' +
-        '<button class="btn-primary" onclick="downloadSurat(' + surat.id + ')"><i class="fas fa-download"></i> Download</button>';
-    
-    modal.classList.add('active');
-}
-
-// ========================================
-// PREVIEW SURAT - NEW FEATURE
-// ========================================
-function previewSurat(id) {
-    var surat = suratData.find(function(s) { return s.id === id; });
-    if (!surat) {
-        showToast('error', 'Error', 'Surat tidak ditemukan');
-        return;
+    var filesHtml = '';
+    if (surat.files && surat.files.length > 0) {
+        filesHtml = '<div class="surat-files"><h4>Lampiran File:</h4><ul>';
+        surat.files.forEach(function(file) {
+            filesHtml += '<li><a href="' + file.url + '" target="_blank"><i class="fas fa-file"></i> ' + file.name + '</a></li>';
+        });
+        filesHtml += '</ul></div>';
     }
     
-    var previewWindow = window.open('', '_blank', 'width=800,height=600');
+    var content = '<div class="surat-detail">' +
+        '<div class="detail-row"><label>Nomor:</label><span>' + surat.nomor + '</span></div>' +
+        '<div class="detail-row"><label>Jenis:</label><span>' + surat.jenis + '</span></div>' +
+        '<div class="detail-row"><label>Divisi:</label><span>' + surat.divisi + '</span></div>' +
+        '<div class="detail-row"><label>Sifat:</label><span>' + surat.sifat + '</span></div>' +
+        '<div class="detail-row"><label>Tanggal:</label><span>' + surat.tanggal + '</span></div>' +
+        '<div class="detail-row"><label>Kepada:</label><span>' + surat.kepada + '</span></div>' +
+        '<div class="detail-row"><label>Perihal:</label><span>' + surat.perihal + '</span></div>' +
+        '<div class="detail-row"><label>Lampiran:</label><span>' + surat.lampiran + '</span></div>' +
+        '<div class="detail-row"><label>Tembusan:</label><span>' + surat.tembusan + '</span></div>' +
+        '<div class="detail-row"><label>Status:</label><span>' + surat.status + '</span></div>' +
+        '<div class="detail-row"><label>Dibuat oleh:</label><span>' + surat.createdBy + '</span></div>' +
+        filesHtml +
+        '</div>';
     
-    var previewContent = '<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-        '<title>Preview - ' + surat.nomor + '</title>' +
-        '<style>' +
-        '* { margin: 0; padding: 0; box-sizing: border-box; }' +
-        'body { font-family: "Times New Roman", Times, serif; font-size: 12pt; line-height: 1.5; padding: 20mm; background: #f5f5f5; }' +
-        '.page { background: white; padding: 20mm; max-width: 210mm; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.1); min-height: 297mm; }' +
-        '.header { text-align: center; border-bottom: 3px double #1B5E9E; padding-bottom: 15px; margin-bottom: 20px; }' +
-        '.header h1 { font-size: 16pt; color: #1B5E9E; margin-bottom: 2px; }' +
-        '.header h2 { font-size: 14pt; color: #8BC34A; font-weight: normal; }' +
-        '.header p { font-size: 10pt; color: #666; }' +
-        '.surat-info { margin-bottom: 20px; }' +
-        '.surat-info table { width: 100%; }' +
-        '.surat-info td { padding: 3px 0; vertical-align: top; }' +
-        '.surat-info td:first-child { width: 120px; }' +
-        '.surat-title { text-align: center; margin: 30px 0; }' +
-        '.surat-title h3 { font-size: 14pt; text-decoration: underline; margin-bottom: 5px; }' +
-        '.kepada { margin-bottom: 20px; }' +
-        '.perihal { margin-bottom: 30px; text-align: justify; }' +
-        '.footer { margin-top: 50px; text-align: right; }' +
-        '.footer .ttd { display: inline-block; text-align: center; min-width: 200px; }' +
-        '.footer .ttd-space { height: 60px; }' +
-        '.tembusan { margin-top: 40px; font-size: 11pt; }' +
-        '.watermark { position: fixed; bottom: 20px; left: 20px; font-size: 9pt; color: #ccc; }' +
-        '.print-btn { position: fixed; top: 20px; right: 20px; padding: 10px 20px; background: #1B5E9E; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; z-index: 100; }' +
-        '.print-btn:hover { background: #134A7C; }' +
-        '@media print { body { padding: 0; background: white; } .page { box-shadow: none; padding: 15mm; } .print-btn { display: none; } .watermark { position: absolute; } }' +
-        '</style></head><body>' +
-        '<button class="print-btn" onclick="window.print()">🖨️ Cetak Surat</button>' +
-        '<div class="page">' +
-        '<div class="header">' +
-        '<h1>PT BANK PEMBANGUNAN DAERAH</h1>' +
-        '<h2>SULAWESI SELATAN DAN SULAWESI BARAT</h2>' +
-        '<p>Jl. Dr. Sam Ratulangi No. 16 Makassar 90125</p>' +
-        '<p>Telp. (0411) 859171 • Fax. (0411) 859188 • www.banksulselbar.co.id</p>' +
-        '</div>' +
-        '<div class="surat-info"><table>' +
-        '<tr><td>Nomor</td><td>: <strong>' + surat.nomor + '</strong></td></tr>' +
-        '<tr><td>Sifat</td><td>: ' + surat.sifat + '</td></tr>' +
-        '<tr><td>Lampiran</td><td>: ' + surat.lampiran + '</td></tr>' +
-        '<tr><td>Perihal</td><td>: <strong>' + surat.perihal + '</strong></td></tr>' +
-        '</table></div>' +
-        '<div class="surat-title"><h3>' + surat.jenis.toUpperCase() + '</h3><p>Nomor: ' + surat.nomor + '</p></div>' +
-        '<div class="kepada"><p>Kepada Yth.</p><p><strong>' + surat.kepada + '</strong></p><p>di Tempat</p></div>' +
-        '<div class="perihal"><p>Dengan hormat,</p><br><p>' + surat.perihal + '</p><br><p>Demikian surat ini kami sampaikan, atas perhatian dan kerjasamanya kami ucapkan terima kasih.</p></div>' +
-        '<div class="footer"><p>Makassar, ' + formatDateLong(surat.tanggal) + '</p><br>' +
-        '<div class="ttd"><p><strong>' + surat.divisi + '</strong></p><div class="ttd-space"></div><p><strong>_______________________</strong></p><p>Pemimpin Divisi</p></div></div>' +
-        '<div class="tembusan"><p><strong>Tembusan:</strong></p><p>- ' + surat.tembusan + '</p></div>' +
-        '<div class="watermark">Dicetak dari CORSEC LENS pada ' + new Date().toLocaleString('id-ID') + '</div>' +
-        '</div></body></html>';
-    
-    previewWindow.document.write(previewContent);
-    previewWindow.document.close();
+    showModal('Detail Surat', content);
 }
 
-function deleteSurat(id) {
-    if (confirm('Apakah Anda yakin ingin menghapus surat ini?\n\nTindakan ini tidak dapat dibatalkan.')) {
-        suratData = suratData.filter(function(s) { return s.id !== id; });
-        saveToStorage();
-        renderSuratTable();
-        updateDashboardStats();
-        showToast('success', 'Berhasil', 'Surat berhasil dihapus');
-    }
-}
-
-function downloadSurat(id) {
-    var surat = suratData.find(function(s) { return s.id === id; });
+async function confirmDeleteSurat(suratId) {
+    var surat = suratData.find(function(s) { return s.id === suratId; });
     if (!surat) return;
     
-    var content = '\n================================================================================\n' +
-        '                          PT BANK SULSELBAR\n' +
-        '          BANK PEMBANGUNAN DAERAH SULAWESI SELATAN DAN SULAWESI BARAT\n' +
+    if (confirm('Yakin ingin menghapus surat ' + surat.nomor + '?')) {
+        var result = await deleteSuratFromFirebase(suratId);
+        
+        if (result.success || !firebaseReady) {
+            // Fallback: remove from local array
+            if (!firebaseReady) {
+                suratData = suratData.filter(function(s) { return s.id !== suratId; });
+                localStorage.setItem('corsecSuratData', JSON.stringify(suratData));
+            }
+            
+            showToast('success', 'Berhasil', 'Surat berhasil dihapus');
+            renderSuratTable();
+            updateDashboardStats();
+        } else {
+            showToast('error', 'Error', 'Gagal menghapus surat');
+        }
+    }
+}
+
+function printSurat(suratId) {
+    var surat = suratData.find(function(s) { return s.id === suratId; });
+    if (!surat) return;
+    
+    var printWindow = window.open('', '_blank');
+    printWindow.document.write('<html><head><title>Surat ' + surat.nomor + '</title>');
+    printWindow.document.write('<style>body{font-family:Arial,sans-serif;padding:40px;line-height:1.6}');
+    printWindow.document.write('.header{text-align:center;margin-bottom:30px}');
+    printWindow.document.write('.content{margin:20px 0}.footer{margin-top:50px}</style></head><body>');
+    printWindow.document.write('<div class="header"><h2>PT BANK SULSELBAR</h2><p>Divisi ' + surat.divisi + '</p></div>');
+    printWindow.document.write('<p><strong>Nomor:</strong> ' + surat.nomor + '</p>');
+    printWindow.document.write('<p><strong>Sifat:</strong> ' + surat.sifat + '</p>');
+    printWindow.document.write('<p><strong>Lampiran:</strong> ' + surat.lampiran + '</p>');
+    printWindow.document.write('<p><strong>Perihal:</strong> ' + surat.perihal + '</p>');
+    printWindow.document.write('<p><strong>Kepada Yth.</strong><br>' + surat.kepada + '</p>');
+    printWindow.document.write('<div class="content"><p>Dengan hormat,</p><p>[Isi surat]</p></div>');
+    printWindow.document.write('<div class="footer"><p>Makassar, ' + new Date(surat.tanggal).toLocaleDateString('id-ID') + '</p>');
+    printWindow.document.write('<p><br><br><br><u>' + surat.createdBy + '</u></p></div>');
+    printWindow.document.write('<p><strong>Tembusan:</strong><br>' + surat.tembusan + '</p>');
+    printWindow.document.write('</body></html>');
+    printWindow.document.close();
+    printWindow.print();
+}
+
+function downloadSurat(suratId) {
+    var surat = suratData.find(function(s) { return s.id === suratId; });
+    if (!surat) return;
+    
+    var content = 'NASKAH DINAS\nPT BANK SULSELBAR\n' +
         '================================================================================\n\n' +
-        surat.jenis.toUpperCase() + '\nNomor: ' + surat.nomor + '\n\n' +
-        '================================================================================\n\n' +
-        'Tanggal     : ' + formatDate(surat.tanggal) + '\n' +
-        'Sifat       : ' + surat.sifat + '\n' +
-        'Lampiran    : ' + surat.lampiran + '\n\n' +
-        '--------------------------------------------------------------------------------\n\n' +
-        'Kepada Yth.\n' + surat.kepada + '\ndi Tempat\n\n' +
-        'Perihal: ' + surat.perihal + '\n\n' +
-        '--------------------------------------------------------------------------------\n\n' +
-        'Dengan hormat,\n\n' + surat.perihal + '\n\n' +
-        'Demikian surat ini kami sampaikan, atas perhatian dan kerjasamanya\n' +
-        'kami ucapkan terima kasih.\n\n' +
-        '                                          Makassar, ' + formatDateLong(surat.tanggal) + '\n\n' +
-        '                                          ' + surat.divisi + '\n\n\n\n' +
-        '                                          _______________________\n' +
-        '                                          Pemimpin Divisi\n\n' +
+        'Nomor      : ' + surat.nomor + '\n' +
+        'Jenis      : ' + surat.jenis + '\n' +
+        'Divisi     : ' + surat.divisi + '\n' +
+        'Sifat      : ' + surat.sifat + '\n' +
+        'Tanggal    : ' + surat.tanggal + '\n' +
+        'Kepada     : ' + surat.kepada + '\n' +
+        'Perihal    : ' + surat.perihal + '\n' +
+        'Lampiran   : ' + surat.lampiran + '\n\n' +
         '--------------------------------------------------------------------------------\n\n' +
         'Tembusan:\n- ' + surat.tembusan + '\n\n' +
         '================================================================================\n' +
-        'Dokumen ini dibuat secara elektronik melalui CORSEC LENS\n' +
+        'Dokumen ini dibuat melalui CORSEC LENS\n' +
         'Divisi Corporate Secretary - Bank Sulselbar\n' +
-        'Dicetak pada: ' + new Date().toLocaleString('id-ID') + '\n' +
         '================================================================================\n';
     
     var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
@@ -1093,7 +1157,7 @@ function exportToExcel() {
     
     suratData.forEach(function(surat, index) {
         csv += (index + 1) + ',"' + surat.nomor + '","' + surat.tanggal + '","' + surat.jenis + '","' + 
-               surat.perihal.replace(/"/g, '""') + '","' + surat.kepada.replace(/"/g, '""') + '","' + 
+               (surat.perihal || '').replace(/"/g, '""') + '","' + (surat.kepada || '').replace(/"/g, '""') + '","' + 
                surat.sifat + '","' + surat.status + '","' + surat.createdBy + '"\n';
     });
     
@@ -1115,7 +1179,6 @@ function printList() { window.print(); }
 // FILE UPLOAD
 // ========================================
 function setupDragAndDrop() {
-    // BUG FIX: Prevent multiple event listener registration
     if (dragDropInitialized) return;
     
     var dropZone = document.getElementById('dropZone');
@@ -1128,18 +1191,18 @@ function setupDragAndDrop() {
         zone.addEventListener('drop', function(e) {
             e.preventDefault();
             zone.classList.remove('dragover');
-            var files = e.dataTransfer.files;
-            if (zone === dropZone) handleFiles(files);
-            else handleUploadFiles(files);
+            if (zone.id === 'uploadDropZone') {
+                handleUploadFiles(e.dataTransfer.files);
+            } else {
+                handleFileDrop(e.dataTransfer.files);
+            }
         });
     });
     
     dragDropInitialized = true;
 }
 
-function handleFileSelect(event) { handleFiles(event.target.files); }
-
-function handleFiles(files) {
+function handleFileDrop(files) {
     var fileList = document.getElementById('fileList');
     if (!fileList) return;
     
@@ -1148,11 +1211,8 @@ function handleFiles(files) {
             showToast('error', 'Error', 'File ' + file.name + ' terlalu besar (max 10MB)');
             return;
         }
-        if (uploadedFiles.find(function(f) { return f.name === file.name; })) {
-            showToast('warning', 'Perhatian', 'File ' + file.name + ' sudah ditambahkan');
-            return;
-        }
-        uploadedFiles.push({ name: file.name, size: file.size, type: file.type });
+        
+        uploadedFiles.push(file);
         
         var fileItem = document.createElement('div');
         fileItem.className = 'file-item';
@@ -1170,7 +1230,7 @@ function removeFile(fileName, button) {
 
 function handleUploadFile(event) { handleUploadFiles(event.target.files); }
 
-function handleUploadFiles(files) {
+async function handleUploadFiles(files) {
     var kategoriEl = document.getElementById('uploadKategori');
     var keteranganEl = document.getElementById('uploadKeterangan');
     var uploadQueue = document.getElementById('uploadQueue');
@@ -1180,10 +1240,10 @@ function handleUploadFiles(files) {
     
     if (!uploadQueue) return;
     
-    Array.from(files).forEach(function(file) {
+    for (var file of Array.from(files)) {
         if (file.size > 25 * 1024 * 1024) {
             showToast('error', 'Error', 'File ' + file.name + ' terlalu besar (max 25MB)');
-            return;
+            continue;
         }
         
         var uploadItem = document.createElement('div');
@@ -1193,328 +1253,339 @@ function handleUploadFiles(files) {
             '<div class="upload-progress"><div class="upload-progress-bar" style="width: 0%"></div></div></div>';
         uploadQueue.appendChild(uploadItem);
         
-        var progress = 0;
         var progressBar = uploadItem.querySelector('.upload-progress-bar');
-        var interval = setInterval(function() {
-            // BUG FIX: Check if element still exists before updating
-            if (!progressBar || !uploadItem.parentNode) {
-                clearInterval(interval);
-                var idx = uploadIntervals.indexOf(interval);
-                if (idx > -1) uploadIntervals.splice(idx, 1);
-                return;
-            }
+        
+        try {
+            // Generate path
+            var timestamp = Date.now();
+            var path = 'dokumen/' + new Date().getFullYear() + '/' + (new Date().getMonth() + 1) + '/' + timestamp + '_' + file.name;
             
-            progress += Math.random() * 30;
-            if (progress >= 100) {
-                progress = 100;
-                clearInterval(interval);
-                
-                // BUG FIX: Remove from tracked intervals
-                var idx = uploadIntervals.indexOf(interval);
-                if (idx > -1) uploadIntervals.splice(idx, 1);
-                
-                dokumenData.push({
-                    id: Date.now() + Math.random(),
+            // Upload to Firebase Storage
+            var result = await uploadFileWithProgress(file, path, function(progress) {
+                if (progressBar) progressBar.style.width = progress + '%';
+            });
+            
+            if (result.success) {
+                // Save metadata to Firestore
+                await saveDokumenToFirebase({
                     name: file.name,
                     size: file.size,
                     type: file.type,
+                    url: result.url,
+                    path: result.path,
                     kategori: kategori,
                     keterangan: keterangan,
-                    uploadedAt: new Date().toISOString(),
-                    uploadedBy: currentUser ? currentUser.name : 'System'
+                    uploadedBy: currentUser ? (currentUser.name || currentUser.username) : 'User'
                 });
                 
-                saveToStorage();
-                
-                setTimeout(function() {
-                    if (uploadItem.parentNode) uploadItem.remove();
-                    showToast('success', 'Upload Berhasil', file.name);
-                    var arsipCount = document.getElementById('arsipCount');
-                    if (arsipCount) arsipCount.textContent = dokumenData.length;
-                }, 500);
+                uploadItem.classList.add('complete');
+                showToast('success', 'Upload Berhasil', file.name);
+            } else {
+                uploadItem.classList.add('error');
+                showToast('error', 'Upload Gagal', file.name);
             }
-            if (progressBar) progressBar.style.width = progress + '%';
-        }, 200);
-        
-        // BUG FIX: Track interval untuk cleanup
-        uploadIntervals.push(interval);
-    });
+        } catch (error) {
+            console.error('Upload error:', error);
+            uploadItem.classList.add('error');
+            showToast('error', 'Upload Error', error.message);
+        }
+    }
 }
 
 // ========================================
-// DOKUMEN & FOLDER MANAGEMENT
+// DOKUMEN GRID
 // ========================================
 function renderDokumenGrid() {
     var grid = document.getElementById('dokumenGrid');
     if (!grid) return;
     
-    var searchEl = document.getElementById('searchDokumen');
-    var filterEl = document.getElementById('filterKategori');
-    var searchTerm = searchEl ? searchEl.value.toLowerCase() : '';
-    var filterKategori = filterEl ? filterEl.value : '';
+    var search = document.getElementById('searchDokumen');
+    var filterKategori = document.getElementById('filterKategori');
     
-    var filteredData = dokumenData.filter(function(doc) {
-        var match = true;
-        if (searchTerm) match = doc.name.toLowerCase().indexOf(searchTerm) > -1;
-        if (filterKategori) match = match && doc.kategori === filterKategori;
-        return match;
+    var searchValue = search ? search.value.toLowerCase() : '';
+    var kategoriValue = filterKategori ? filterKategori.value : '';
+    
+    var filtered = dokumenData.filter(function(doc) {
+        var matchSearch = !searchValue || (doc.name && doc.name.toLowerCase().includes(searchValue));
+        var matchKategori = !kategoriValue || doc.kategori === kategoriValue;
+        return matchSearch && matchKategori;
     });
     
-    if (filteredData.length === 0) {
-        grid.innerHTML = '<div style="grid-column: 1 / -1; padding: 60px; text-align: center;">' +
-            '<i class="fas fa-folder-open" style="font-size: 64px; color: #ccc; margin-bottom: 15px;"></i>' +
-            '<p style="color: #999;">Tidak ada dokumen</p>' +
-            '<button class="btn-primary" style="margin-top: 20px;" onclick="navigateTo(\'upload-dokumen\')">' +
-            '<i class="fas fa-upload"></i> Upload Dokumen</button></div>';
+    if (filtered.length === 0) {
+        grid.innerHTML = '<div class="empty-state"><i class="fas fa-folder-open"></i><p>Tidak ada dokumen</p></div>';
         return;
     }
     
     var html = '';
-    filteredData.forEach(function(doc) {
-        html += '<div class="dokumen-card" onclick="viewDokumen(\'' + doc.id + '\')">' +
-            '<div class="dokumen-card-icon ' + getFileClass(doc.type) + '"><i class="fas ' + getFileIcon(doc.type) + '"></i></div>' +
-            '<h4 title="' + doc.name + '">' + doc.name + '</h4>' +
-            '<p>' + formatFileSize(doc.size) + ' • ' + formatDate(doc.uploadedAt) + '</p>' +
-            '<span class="dokumen-card-badge">' + doc.kategori + '</span></div>';
+    filtered.forEach(function(doc) {
+        html += '<div class="dokumen-card">';
+        html += '<div class="dokumen-icon"><i class="fas ' + getFileIcon(doc.type) + '"></i></div>';
+        html += '<div class="dokumen-info">';
+        html += '<h4>' + doc.name + '</h4>';
+        html += '<p>' + formatFileSize(doc.size) + ' • ' + (doc.kategori || 'Umum') + '</p>';
+        html += '</div>';
+        html += '<div class="dokumen-actions">';
+        if (doc.url) {
+            html += '<a href="' + doc.url + '" target="_blank" class="btn-icon" title="Lihat"><i class="fas fa-eye"></i></a>';
+            html += '<a href="' + doc.url + '" download="' + doc.name + '" class="btn-icon" title="Download"><i class="fas fa-download"></i></a>';
+        }
+        html += '<button class="btn-icon danger" onclick="confirmDeleteDokumen(\'' + doc.id + '\', \'' + (doc.path || '') + '\')" title="Hapus"><i class="fas fa-trash"></i></button>';
+        html += '</div></div>';
     });
+    
     grid.innerHTML = html;
 }
 
-function filterDokumenList() { renderDokumenGrid(); }
-
-function setView(view) {
-    var gridBtn = document.getElementById('gridViewBtn');
-    var listBtn = document.getElementById('listViewBtn');
-    if (gridBtn) gridBtn.classList.toggle('active', view === 'grid');
-    if (listBtn) listBtn.classList.toggle('active', view === 'list');
+function filterDokumenGrid() {
+    renderDokumenGrid();
 }
 
-function viewDokumen(id) {
-    var doc = dokumenData.find(function(d) { return d.id == id; });
-    if (doc) showToast('info', 'Dokumen', doc.name + '\nKategori: ' + doc.kategori + '\nUkuran: ' + formatFileSize(doc.size));
-}
-
-function renderFolderTree() {
-    var folderTree = document.getElementById('folderTree');
-    if (!folderTree) return;
-    
-    var html = '';
-    suratData.forEach(function(surat) {
-        var files = dokumenData.filter(function(d) { return d.suratId === surat.id; });
-        // BUG FIX: Pass event parameter
-        html += '<div class="folder-tree-item" onclick="openFolder(' + surat.id + ', \'surat\', event)">' +
-            '<i class="fas fa-file-alt"></i><span title="' + surat.perihal + '">' + surat.nomor.replace(/\//g, '-').substring(0, 25) + '</span>' +
-            (files.length > 0 ? '<span style="margin-left: auto; font-size: 11px; color: #999; background: #eee; padding: 2px 6px; border-radius: 10px;">' + files.length + '</span>' : '') +
-            '</div>';
-    });
-    
-    ['Surat Masuk', 'Laporan', 'Notulen', 'Umum', 'Lainnya'].forEach(function(cat) {
-        var files = dokumenData.filter(function(d) { return d.kategori === cat && !d.suratId; });
-        // BUG FIX: Pass event parameter
-        html += '<div class="folder-tree-item" onclick="openFolder(\'' + cat + '\', \'category\', event)">' +
-            '<i class="fas fa-folder"></i><span>' + cat + '</span>' +
-            (files.length > 0 ? '<span style="margin-left: auto; font-size: 11px; color: #999; background: #eee; padding: 2px 6px; border-radius: 10px;">' + files.length + '</span>' : '') +
-            '</div>';
-    });
-    
-    folderTree.innerHTML = html;
-}
-
-// BUG FIX: Tambahkan event parameter
-function openFolder(folderId, type, evt) {
-    var folderContent = document.getElementById('folderContent');
-    if (!folderContent) return;
-    
-    var files = [];
-    var folderTitle = '';
-    
-    if (type === 'surat') {
-        var surat = suratData.find(function(s) { return s.id == folderId; });
-        if (surat) {
-            files = dokumenData.filter(function(d) { return d.suratId == surat.id; });
-            folderTitle = surat.nomor;
+async function confirmDeleteDokumen(dokumenId, filePath) {
+    if (confirm('Yakin ingin menghapus dokumen ini?')) {
+        var result = await deleteDokumenFromFirebase(dokumenId, filePath);
+        
+        if (result.success || !firebaseReady) {
+            if (!firebaseReady) {
+                dokumenData = dokumenData.filter(function(d) { return d.id !== dokumenId; });
+                localStorage.setItem('corsecDokumenData', JSON.stringify(dokumenData));
+            }
+            
+            showToast('success', 'Berhasil', 'Dokumen berhasil dihapus');
+            renderDokumenGrid();
+            updateDashboardStats();
+        } else {
+            showToast('error', 'Error', 'Gagal menghapus dokumen');
         }
-    } else {
-        files = dokumenData.filter(function(d) { return d.kategori === folderId && !d.suratId; });
-        folderTitle = folderId;
     }
+}
+
+// ========================================
+// FOLDER TREE
+// ========================================
+function renderFolderTree() {
+    var container = document.getElementById('folderTree');
+    var content = document.getElementById('folderContent');
+    if (!container) return;
     
-    document.querySelectorAll('.folder-tree-item').forEach(function(item) { item.classList.remove('active'); });
-    // BUG FIX: Use evt parameter instead of global event
-    if (evt && evt.target) {
-        var target = evt.target.closest('.folder-tree-item');
-        if (target) target.classList.add('active');
+    // Group by category
+    var folders = {};
+    dokumenData.forEach(function(doc) {
+        var cat = doc.kategori || 'Lainnya';
+        if (!folders[cat]) folders[cat] = [];
+        folders[cat].push(doc);
+    });
+    
+    // Also group surat by type
+    suratData.forEach(function(surat) {
+        var cat = 'Surat: ' + surat.jenis;
+        if (!folders[cat]) folders[cat] = [];
+        folders[cat].push({ type: 'surat', ...surat });
+    });
+    
+    var html = '<ul class="folder-list">';
+    Object.keys(folders).forEach(function(folderName) {
+        var count = folders[folderName].length;
+        html += '<li class="folder-item" onclick="openFolder(\'' + folderName + '\', event)">';
+        html += '<i class="fas fa-folder"></i> ' + folderName + ' <span class="count">(' + count + ')</span>';
+        html += '</li>';
+    });
+    html += '</ul>';
+    
+    container.innerHTML = html;
+    
+    if (content) {
+        content.innerHTML = '<div class="empty-state"><i class="fas fa-hand-pointer"></i><p>Pilih folder untuk melihat isi</p></div>';
     }
+}
+
+function openFolder(folderName, evt) {
+    if (evt) evt.preventDefault();
     
-    if (files.length === 0) {
-        folderContent.innerHTML = '<div style="text-align: center; padding: 40px;"><i class="fas fa-folder-open" style="font-size: 48px; color: #ccc;"></i>' +
-            '<p style="color: #999; margin-top: 15px;">Folder <strong>' + folderTitle + '</strong> kosong</p></div>';
+    var content = document.getElementById('folderContent');
+    if (!content) return;
+    
+    // Get items in folder
+    var items = [];
+    
+    dokumenData.forEach(function(doc) {
+        if ((doc.kategori || 'Lainnya') === folderName) {
+            items.push({ type: 'dokumen', ...doc });
+        }
+    });
+    
+    suratData.forEach(function(surat) {
+        if (('Surat: ' + surat.jenis) === folderName) {
+            items.push({ type: 'surat', ...surat });
+        }
+    });
+    
+    if (items.length === 0) {
+        content.innerHTML = '<div class="empty-state"><i class="fas fa-folder-open"></i><p>Folder kosong</p></div>';
         return;
     }
     
-    var html = '<h3 style="margin-bottom: 20px; color: #1B5E9E;"><i class="fas fa-folder-open"></i> ' + folderTitle + '</h3>' +
-        '<div class="dokumen-grid" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));">';
-    files.forEach(function(doc) {
-        html += '<div class="dokumen-card" onclick="viewDokumen(\'' + doc.id + '\')">' +
-            '<div class="dokumen-card-icon ' + getFileClass(doc.type) + '"><i class="fas ' + getFileIcon(doc.type) + '"></i></div>' +
-            '<h4 title="' + doc.name + '">' + doc.name.substring(0, 20) + (doc.name.length > 20 ? '...' : '') + '</h4>' +
-            '<p>' + formatFileSize(doc.size) + '</p></div>';
+    var html = '<div class="folder-items">';
+    items.forEach(function(item) {
+        if (item.type === 'surat') {
+            html += '<div class="folder-item-card">';
+            html += '<i class="fas fa-file-alt"></i>';
+            html += '<span>' + item.nomor + '</span>';
+            html += '<small>' + (item.perihal || '').substring(0, 30) + '</small>';
+            html += '</div>';
+        } else {
+            html += '<div class="folder-item-card">';
+            html += '<i class="fas ' + getFileIcon(item.type) + '"></i>';
+            html += '<span>' + item.name + '</span>';
+            if (item.url) {
+                html += '<a href="' + item.url + '" target="_blank" class="btn-sm">Buka</a>';
+            }
+            html += '</div>';
+        }
     });
     html += '</div>';
-    folderContent.innerHTML = html;
-}
-
-// ========================================
-// REPORTS & SETTINGS
-// ========================================
-function previewReport() {
-    showToast('info', 'Preview', 'Fitur preview laporan - silahkan gunakan Export atau Print');
-}
-
-function generateReport() {
-    exportToExcel();
-}
-
-function saveSettings() {
-    var nameEl = document.getElementById('settingName');
-    var nipEl = document.getElementById('settingNIP');
-    var jabatanEl = document.getElementById('settingJabatan');
     
-    if (currentUser && nameEl) {
-        currentUser.name = nameEl.value;
-        if (nipEl) currentUser.nip = nipEl.value;
-        if (jabatanEl) currentUser.role = jabatanEl.value;
-        localStorage.setItem('corsecSession', JSON.stringify(currentUser));
-        updateUserInfo();
-    }
-    showToast('success', 'Pengaturan', 'Pengaturan berhasil disimpan');
-}
-
-function showChangePassword() {
-    showToast('info', 'Ubah Password', 'Fitur ubah password dalam pengembangan');
+    content.innerHTML = html;
 }
 
 // ========================================
-// MODAL & TOAST
+// UTILITIES
 // ========================================
-function closeModal(modalId) {
-    var modal = document.getElementById(modalId);
-    if (modal) modal.classList.remove('active');
+function getFileIcon(mimeType) {
+    if (!mimeType) return 'fa-file';
+    if (mimeType.includes('pdf')) return 'fa-file-pdf';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word';
+    if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) return 'fa-file-excel';
+    if (mimeType.includes('image')) return 'fa-file-image';
+    if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint';
+    return 'fa-file';
 }
 
-window.onclick = function(event) {
-    if (event.target.classList.contains('modal')) {
-        event.target.classList.remove('active');
-    }
-};
+function formatFileSize(bytes) {
+    if (!bytes) return '0 B';
+    var sizes = ['B', 'KB', 'MB', 'GB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + sizes[i];
+}
 
 function showToast(type, title, message) {
     var container = document.getElementById('toastContainer');
-    if (!container) return;
-    
-    var icons = { success: 'fa-check', error: 'fa-times', warning: 'fa-exclamation', info: 'fa-info' };
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
     
     var toast = document.createElement('div');
     toast.className = 'toast ' + type;
-    toast.innerHTML = '<div class="toast-icon"><i class="fas ' + (icons[type] || 'fa-info') + '"></i></div>' +
+    
+    var icons = { success: 'check-circle', error: 'times-circle', warning: 'exclamation-circle', info: 'info-circle' };
+    
+    toast.innerHTML = '<div class="toast-icon"><i class="fas fa-' + (icons[type] || 'info-circle') + '"></i></div>' +
         '<div class="toast-content"><h4>' + title + '</h4><p>' + message + '</p></div>' +
         '<button class="toast-close" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>';
     
     container.appendChild(toast);
     
     setTimeout(function() {
-        if (toast.parentElement) {
-            toast.style.animation = 'toastSlide 0.3s ease reverse';
-            setTimeout(function() { toast.remove(); }, 300);
-        }
+        toast.classList.add('show');
+    }, 10);
+    
+    setTimeout(function() {
+        toast.classList.remove('show');
+        setTimeout(function() { toast.remove(); }, 300);
     }, 5000);
 }
 
+function showModal(title, content) {
+    var modal = document.getElementById('modal');
+    var modalTitle = document.getElementById('modalTitle');
+    var modalBody = document.getElementById('modalBody');
+    
+    if (modal && modalTitle && modalBody) {
+        modalTitle.textContent = title;
+        modalBody.innerHTML = content;
+        modal.style.display = 'flex';
+    }
+}
+
+function closeModal() {
+    var modal = document.getElementById('modal');
+    if (modal) modal.style.display = 'none';
+}
+
 // ========================================
-// UTILITY FUNCTIONS
+// SAMPLE DATA
 // ========================================
-function formatDate(dateString) {
-    if (!dateString) return '-';
-    var date = new Date(dateString);
-    var options = { day: '2-digit', month: 'short', year: 'numeric' };
-    return date.toLocaleDateString('id-ID', options);
-}
-
-function formatDateLong(dateString) {
-    if (!dateString) return '-';
-    var date = new Date(dateString);
-    var options = { day: 'numeric', month: 'long', year: 'numeric' };
-    return date.toLocaleDateString('id-ID', options);
-}
-
-function formatFileSize(bytes) {
-    if (!bytes || bytes === 0) return '0 Bytes';
-    var k = 1024;
-    var sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    var i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-function getFileIcon(type) {
-    if (!type) return 'fa-file';
-    if (type.indexOf('pdf') > -1) return 'fa-file-pdf';
-    if (type.indexOf('word') > -1 || type.indexOf('document') > -1) return 'fa-file-word';
-    if (type.indexOf('excel') > -1 || type.indexOf('spreadsheet') > -1) return 'fa-file-excel';
-    if (type.indexOf('image') > -1) return 'fa-file-image';
-    return 'fa-file';
-}
-
-function getFileClass(type) {
-    if (!type) return '';
-    if (type.indexOf('pdf') > -1) return 'pdf';
-    if (type.indexOf('word') > -1 || type.indexOf('document') > -1) return 'doc';
-    if (type.indexOf('excel') > -1 || type.indexOf('spreadsheet') > -1) return 'xls';
-    if (type.indexOf('image') > -1) return 'img';
-    return '';
-}
-
-function handleGlobalSearch(event) {
-    if (event.key === 'Enter') {
-        var query = event.target.value.trim();
-        if (query) {
-            navigateTo('daftar-surat');
-            setTimeout(function() {
-                var searchInput = document.getElementById('searchSurat');
-                if (searchInput) {
-                    searchInput.value = query;
-                    filterSuratList();
-                }
-            }, 100);
+function loadSampleData() {
+    const now = Date.now();
+    suratData = [
+        {
+            id: String(now),
+            nomor: 'SR/001/B/DCS/XII/25',
+            jenis: 'Surat Biasa',
+            divisi: 'Corporate Secretary',
+            sifat: 'Biasa',
+            tanggal: '2025-12-18',
+            kepada: 'Direktur Utama Bank Sulselbar',
+            perihal: 'Laporan Pelaksanaan RUPST 2025',
+            lampiran: '3 Berkas',
+            tembusan: 'Arsip',
+            status: 'Selesai',
+            files: [],
+            createdBy: 'Safirah Wardinah'
+        },
+        {
+            id: String(now + 1),
+            nomor: 'SK/001/DIR/XII/2025',
+            jenis: 'Surat Keputusan',
+            divisi: 'Direksi',
+            sifat: 'Segera',
+            tanggal: '2025-12-17',
+            kepada: 'Seluruh Pegawai',
+            perihal: 'Pemberian Penghargaan Masa Kerja',
+            lampiran: '1 Lampiran',
+            tembusan: 'DHC',
+            status: 'Selesai',
+            files: [],
+            createdBy: 'Safirah Wardinah'
         }
-    }
+    ];
+    
+    nomorCounters = {
+        'Surat Biasa': 1,
+        'Surat Keputusan': 1
+    };
+    
+    localStorage.setItem('corsecSuratData', JSON.stringify(suratData));
+    localStorage.setItem('corsecNomorCounters', JSON.stringify(nomorCounters));
 }
 
-function toggleNotifications() {
-    showToast('info', 'Notifikasi', 'Tidak ada notifikasi baru');
+// ========================================
+// REPORTS
+// ========================================
+function previewReport() {
+    showToast('info', 'Preview', 'Gunakan Export atau Print untuk melihat laporan');
 }
 
-// Keyboard shortcuts
-document.addEventListener('keydown', function(e) {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.ctrlKey && e.key === 'n') { e.preventDefault(); if (currentUser) navigateTo('buat-surat'); }
-    if (e.ctrlKey && e.key === 'd') { e.preventDefault(); if (currentUser) navigateTo('dashboard'); }
-    if (e.key === 'Escape') { document.querySelectorAll('.modal.active').forEach(function(m) { m.classList.remove('active'); }); }
-});
+function generateReport() {
+    exportToExcel();
+}
 
-// BUG FIX: Auto-save sekarang dikelola oleh startAutoSave() yang ter-track
-// setInterval yang lama telah dihapus untuk mencegah memory leak
+function saveProfile() {
+    showToast('success', 'Berhasil', 'Profil berhasil disimpan');
+}
 
-// Window resize
-window.addEventListener('resize', function() {
-    if (window.innerWidth > 1024) {
-        var sidebar = document.getElementById('sidebar');
-        if (sidebar) sidebar.classList.remove('active');
+function changePassword() {
+    showToast('info', 'Info', 'Fitur ubah password - hubungi admin');
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    var modal = document.getElementById('modal');
+    if (event.target === modal) {
+        closeModal();
     }
-});
+};
 
-// BUG FIX: Cleanup saat page unload
-window.addEventListener('beforeunload', function() {
-    cleanupResources();
-});
-
-console.log('CORSEC LENS v1.0.3 - Chart Bug Fixed - Loaded Successfully');
+console.log('CORSEC LENS v2.0.0 - Firebase Integration - Loaded');
