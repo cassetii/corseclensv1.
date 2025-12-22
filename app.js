@@ -628,24 +628,48 @@ async function handleLogout() {
     
     // Show login page
     document.getElementById('loginPage').style.display = 'flex';
-    document.getElementById('mainApp').style.display = 'none';
+    document.getElementById('appContainer').style.display = 'none'; // Fixed: was 'mainApp'
     
     showToast('info', 'Logout', 'Anda telah keluar dari sistem');
 }
 
 function showMainApp() {
-    document.getElementById('loginPage').style.display = 'none';
-    document.getElementById('mainApp').style.display = 'flex';
+    console.log('showMainApp called'); // Debug
     
-    // Update user info
-    var userName = document.getElementById('userName');
+    var loginPage = document.getElementById('loginPage');
+    var mainApp = document.getElementById('appContainer'); // Fixed: was 'mainApp'
+    
+    console.log('loginPage element:', loginPage); // Debug
+    console.log('appContainer element:', mainApp); // Debug
+    
+    if (!mainApp) {
+        console.error('ERROR: appContainer element not found!');
+        alert('Error: appContainer tidak ditemukan. Pastikan HTML sudah benar.');
+        return;
+    }
+    
+    if (loginPage) {
+        loginPage.style.display = 'none';
+    }
+    
+    mainApp.style.display = 'flex';
+    
+    // Update user info - Fixed IDs
+    var userName = document.getElementById('userDisplayName'); // Fixed: was 'userName'
     var userRole = document.getElementById('userRole');
     if (userName) userName.textContent = currentUser.name || currentUser.username || 'User';
     if (userRole) userRole.textContent = currentUser.role || 'Staff';
     
+    console.log('Calling navigateTo dashboard...'); // Debug
+    
     // Initialize
-    navigateTo('dashboard');
-    setupDragAndDrop();
+    try {
+        navigateTo('dashboard');
+        setupDragAndDrop();
+        console.log('Dashboard loaded successfully'); // Debug
+    } catch (e) {
+        console.error('Error loading dashboard:', e);
+    }
 }
 
 // ========================================
