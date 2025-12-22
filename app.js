@@ -1,13 +1,12 @@
 /**
  * CORSEC LENS - Aplikasi Penomoran Naskah Dinas
  * PT Bank Sulselbar - Divisi Corporate Secretary
- * Version 2.0.0 - Firebase Integration
+ * Version 2.0.1 - Firebase Integration (Fixed)
  * 
- * Fitur:
- * - Data tersimpan permanen di Firebase Firestore
- * - File dokumen tersimpan di Firebase Storage
- * - Multi-user dengan Authentication
- * - Realtime sync antar device
+ * PERBAIKAN:
+ * - Fix double upload dengan flag isUploading
+ * - Fix data tidak tampil dengan load manual
+ * - Fix jumlah 0 dengan load data saat login
  */
 
 // ========================================
@@ -24,15 +23,14 @@ const firebaseConfig = {
 };
 
 // CORSEC LENS menggunakan folder terpisah agar tidak mengganggu data lain
-const CORSEC_STORAGE_PATH = 'corsec_lens';  // Folder khusus di Storage
-const CORSEC_COLLECTION = 'corsec_lens';     // Collection khusus di Firestore
+const CORSEC_STORAGE_PATH = 'corsec_lens';
+const CORSEC_COLLECTION = 'corsec_lens';
 
 // Initialize Firebase
 let app, db, storage, auth;
 let firebaseReady = false;
 
 function initFirebase() {
-    // Check if Firebase SDK loaded
     if (typeof firebase === 'undefined') {
         console.warn('Firebase SDK not loaded - running in offline mode');
         firebaseReady = false;
@@ -40,7 +38,6 @@ function initFirebase() {
     }
     
     try {
-        // Check if already initialized
         if (firebase.apps && firebase.apps.length > 0) {
             app = firebase.apps[0];
         } else {
@@ -54,7 +51,6 @@ function initFirebase() {
         console.log('✅ Firebase initialized successfully');
     } catch (error) {
         console.error('Firebase init error:', error);
-        console.warn('Running in offline/demo mode');
         firebaseReady = false;
     }
 }
@@ -75,6 +71,10 @@ let uploadIntervals = [];
 let autoSaveInterval = null;
 let dragDropInitialized = false;
 
+// FIX: Flag untuk mencegah double upload
+let isUploading = false;
+let isLoadingData = false;
+
 // Unsubscribe functions untuk realtime listeners
 let unsubscribeSurat = null;
 let unsubscribeDokumen = null;
@@ -91,7 +91,6 @@ async function firebaseLogin(email, password) {
         const userCredential = await auth.signInWithEmailAndPassword(email, password);
         const user = userCredential.user;
         
-        // Cek apakah user ada di Firestore
         const userDoc = await db.collection('users').doc(user.uid).get();
         
         if (userDoc.exists) {
@@ -110,7 +109,6 @@ async function firebaseLogin(email, password) {
 
 async function firebaseLogout() {
     try {
-        // Unsubscribe dari realtime listeners
         if (unsubscribeSurat) unsubscribeSurat();
         if (unsubscribeDokumen) unsubscribeDokumen();
         
@@ -118,6 +116,69 @@ async function firebaseLogout() {
         return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
+    }
+}
+
+// ========================================
+// FIREBASE - LOAD DATA (MANUAL - FIX untuk data tidak tampil)
+// ========================================
+async function loadSuratFromFirebase() {
+    if (!firebaseReady || isLoadingData) return;
+    
+    try {
+        console.log('Loading surat from Firebase...');
+        const snapshot = await db.collection(CORSEC_COLLECTION).doc('data').collection('surat')
+            .orderBy('createdAt', 'desc')
+            .limit(100)
+            .get();
+        
+        suratData = [];
+        snapshot.forEach(doc => {
+            suratData.push({ id: doc.id, ...doc.data() });
+        });
+        
+        console.log('✅ Loaded', suratData.length, 'surat');
+        return suratData;
+    } catch (error) {
+        console.error('Load surat error:', error);
+        return [];
+    }
+}
+
+async function loadDokumenFromFirebase() {
+    if (!firebaseReady) return;
+    
+    try {
+        console.log('Loading dokumen from Firebase...');
+        const snapshot = await db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen')
+            .orderBy('createdAt', 'desc')
+            .limit(100)
+            .get();
+        
+        dokumenData = [];
+        snapshot.forEach(doc => {
+            dokumenData.push({ id: doc.id, ...doc.data() });
+        });
+        
+        console.log('✅ Loaded', dokumenData.length, 'dokumen');
+        return dokumenData;
+    } catch (error) {
+        console.error('Load dokumen error:', error);
+        return [];
+    }
+}
+
+async function loadCountersFromFirebase() {
+    if (!firebaseReady) return;
+    
+    try {
+        const doc = await db.collection(CORSEC_COLLECTION).doc('counters').get();
+        if (doc.exists) {
+            nomorCounters = doc.data();
+            console.log('✅ Loaded counters:', nomorCounters);
+        }
+    } catch (error) {
+        console.error('Load counters error:', error);
     }
 }
 
@@ -131,7 +192,6 @@ async function saveSuratToFirebase(suratObj) {
     }
     
     try {
-        // Gunakan subcollection di dalam corsec_lens
         const docRef = await db.collection(CORSEC_COLLECTION).doc('data').collection('surat').add({
             ...suratObj,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -172,44 +232,38 @@ async function deleteSuratFromFirebase(suratId) {
     }
 }
 
-// Realtime listener untuk surat
+// Realtime listener untuk surat (backup - data utama dari load manual)
 function listenToSurat() {
     if (!firebaseReady) return;
     
-    unsubscribeSurat = db.collection(CORSEC_COLLECTION).doc('data').collection('surat')
-        .orderBy('createdAt', 'desc')
-        .onSnapshot((snapshot) => {
-            suratData = [];
-            snapshot.forEach(doc => {
-                suratData.push({ id: doc.id, visibleId: doc.id, ...doc.data() });
+    try {
+        unsubscribeSurat = db.collection(CORSEC_COLLECTION).doc('data').collection('surat')
+            .orderBy('createdAt', 'desc')
+            .onSnapshot((snapshot) => {
+                suratData = [];
+                snapshot.forEach(doc => {
+                    suratData.push({ id: doc.id, ...doc.data() });
+                });
+                
+                console.log('Realtime update: ', suratData.length, 'surat');
+                
+                if (document.getElementById('suratTableBody')) {
+                    renderSuratTable();
+                }
+                updateDashboardStats();
+                renderActivityList();
+            }, (error) => {
+                console.error('Listen surat error:', error);
             });
-            
-            // Update UI
-            if (document.getElementById('suratTableBody')) {
-                renderSuratTable();
-            }
-            updateDashboardStats();
-            renderActivityList();
-        }, (error) => {
-            console.error('Listen surat error:', error);
-        });
+    } catch (e) {
+        console.warn('Listen surat failed:', e);
+    }
 }
 
 // ========================================
-// FIREBASE - COUNTER OPERATIONS (dengan caching)
+// FIREBASE - COUNTER OPERATIONS
 // ========================================
-var counterCache = {};
-var counterCacheTime = {};
-var CACHE_DURATION = 60000; // 1 menit cache
-
 async function getNomorCounter(jenisSurat) {
-    // Return from cache if still valid
-    if (counterCache[jenisSurat] !== undefined && counterCacheTime[jenisSurat]) {
-        if (Date.now() - counterCacheTime[jenisSurat] < CACHE_DURATION) {
-            return counterCache[jenisSurat];
-        }
-    }
-    
     if (!firebaseReady) return nomorCounters[jenisSurat] || 0;
     
     try {
@@ -217,26 +271,18 @@ async function getNomorCounter(jenisSurat) {
         const doc = await counterRef.get();
         
         if (doc.exists && doc.data()[jenisSurat]) {
-            counterCache[jenisSurat] = doc.data()[jenisSurat];
-            counterCacheTime[jenisSurat] = Date.now();
             return doc.data()[jenisSurat];
         }
         return 0;
     } catch (error) {
         console.error('Get counter error:', error);
-        // Return cached value on error
-        if (counterCache[jenisSurat] !== undefined) {
-            return counterCache[jenisSurat];
-        }
         return nomorCounters[jenisSurat] || 0;
     }
 }
 
 async function incrementNomorCounter(jenisSurat) {
-    // Update local cache immediately
-    counterCache[jenisSurat] = (counterCache[jenisSurat] || 0) + 1;
-    counterCacheTime[jenisSurat] = Date.now();
-    nomorCounters[jenisSurat] = counterCache[jenisSurat];
+    // Update local immediately
+    nomorCounters[jenisSurat] = (nomorCounters[jenisSurat] || 0) + 1;
     
     if (!firebaseReady) {
         return { success: true };
@@ -259,8 +305,7 @@ async function incrementNomorCounter(jenisSurat) {
         return { success: true };
     } catch (error) {
         console.error('Increment counter error:', error);
-        // Still return success because local counter was updated
-        return { success: true, warning: 'Firebase sync failed, using local counter' };
+        return { success: true }; // Return success karena local sudah di-update
     }
 }
 
@@ -274,7 +319,6 @@ async function uploadFileToStorage(file, customPath) {
     
     try {
         const storageRef = storage.ref();
-        // Selalu gunakan folder corsec_lens di Storage
         const path = CORSEC_STORAGE_PATH + '/' + customPath;
         const fileRef = storageRef.child(path);
         
@@ -303,7 +347,6 @@ function uploadFileWithProgress(file, customPath, onProgress) {
         }
         
         const storageRef = storage.ref();
-        // Selalu gunakan folder corsec_lens di Storage
         const path = CORSEC_STORAGE_PATH + '/' + customPath;
         const fileRef = storageRef.child(path);
         const uploadTask = fileRef.put(file);
@@ -368,12 +411,10 @@ async function deleteDokumenFromFirebase(dokumenId, filePath) {
     if (!firebaseReady) return { success: false };
     
     try {
-        // Hapus file dari Storage
         if (filePath) {
             await deleteFileFromStorage(filePath);
         }
         
-        // Hapus metadata dari Firestore
         await db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen').doc(dokumenId).delete();
         
         return { success: true };
@@ -387,22 +428,27 @@ async function deleteDokumenFromFirebase(dokumenId, filePath) {
 function listenToDokumen() {
     if (!firebaseReady) return;
     
-    unsubscribeDokumen = db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen')
-        .orderBy('createdAt', 'desc')
-        .onSnapshot((snapshot) => {
-            dokumenData = [];
-            snapshot.forEach(doc => {
-                dokumenData.push({ id: doc.id, ...doc.data() });
+    try {
+        unsubscribeDokumen = db.collection(CORSEC_COLLECTION).doc('data').collection('dokumen')
+            .orderBy('createdAt', 'desc')
+            .onSnapshot((snapshot) => {
+                dokumenData = [];
+                snapshot.forEach(doc => {
+                    dokumenData.push({ id: doc.id, ...doc.data() });
+                });
+                
+                console.log('Realtime update:', dokumenData.length, 'dokumen');
+                
+                if (document.getElementById('dokumenGrid')) {
+                    renderDokumenGrid();
+                }
+                updateDashboardStats();
+            }, (error) => {
+                console.error('Listen dokumen error:', error);
             });
-            
-            // Update UI
-            if (document.getElementById('dokumenGrid')) {
-                renderDokumenGrid();
-            }
-            updateDashboardStats();
-        }, (error) => {
-            console.error('Listen dokumen error:', error);
-        });
+    } catch (e) {
+        console.warn('Listen dokumen failed:', e);
+    }
 }
 
 // ========================================
@@ -435,79 +481,57 @@ function loadFromLocalStorage() {
 // CLEANUP RESOURCES
 // ========================================
 function cleanupResources() {
-    // Clear all chart timeouts
     Object.values(chartTimeouts).forEach(clearTimeout);
     chartTimeouts = {};
     
-    // Clear all counter intervals
     Object.values(counterIntervals).forEach(clearInterval);
     counterIntervals = {};
     
-    // Clear upload intervals
     uploadIntervals.forEach(clearInterval);
     uploadIntervals = [];
     
-    // Clear auto-save
     if (autoSaveInterval) {
         clearInterval(autoSaveInterval);
         autoSaveInterval = null;
     }
     
-    // Destroy dashboard chart
     try {
         if (window.monthlyChart instanceof Chart) window.monthlyChart.destroy();
-    } catch(e) {
-        console.warn('Chart cleanup error:', e);
-    }
+    } catch(e) {}
 }
 
 // ========================================
 // INITIALIZE APPLICATION
 // ========================================
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize Firebase first
     initFirebase();
-    
-    // Load from localStorage as fallback
     loadFromLocalStorage();
     
-    // Check session
     const session = localStorage.getItem('corsecSession');
     if (session) {
         currentUser = JSON.parse(session);
         showMainApp();
-        
-        // Start realtime listeners if Firebase ready
-        if (firebaseReady) {
-            listenToSurat();
-            listenToDokumen();
-        }
     }
     
-    // Setup event listeners
     setupEventListeners();
 });
 
 function setupEventListeners() {
-    // Login form
     var loginForm = document.getElementById('loginForm');
     if (loginForm) {
         loginForm.addEventListener('submit', handleLogin);
     }
     
-    // Surat form
     var suratForm = document.getElementById('suratForm');
     if (suratForm) {
         suratForm.addEventListener('submit', handleCreateSurat);
     }
     
-    // Logout button
     var logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', handleLogout);
     }
     
-    // Cleanup on page unload
     window.addEventListener('beforeunload', cleanupResources);
 }
 
@@ -517,14 +541,11 @@ function setupEventListeners() {
 async function handleLogin(event) {
     event.preventDefault();
     
-    console.log('Login attempt...'); // Debug
-    
     var usernameEl = document.getElementById('username');
     var passwordEl = document.getElementById('password');
-    var rememberEl = document.getElementById('rememberMe'); // Fixed: was 'remember'
+    var rememberEl = document.getElementById('rememberMe');
     
     if (!usernameEl || !passwordEl) {
-        console.error('Form elements not found!');
         showToast('error', 'Error', 'Form tidak ditemukan');
         return;
     }
@@ -533,14 +554,11 @@ async function handleLogin(event) {
     var password = passwordEl.value;
     var remember = rememberEl ? rememberEl.checked : false;
     
-    console.log('Username:', username); // Debug
-    
     if (!username || !password) {
         showToast('error', 'Error', 'Username dan password harus diisi');
         return;
     }
     
-    // Show loading
     var loginBtn = document.querySelector('#loginForm button[type="submit"]');
     var originalText = loginBtn ? loginBtn.innerHTML : '';
     if (loginBtn) {
@@ -548,18 +566,13 @@ async function handleLogin(event) {
         loginBtn.disabled = true;
     }
     
-    // Demo users - ALWAYS available
     var demoUsers = {
         'safirah': { password: 'corsec2025', name: 'Safirah Wardinah Irianto', role: 'Asisten Administrasi' },
         'hartani': { password: 'pemimpin2025', name: 'Hartani Syamsuddin', role: 'Pemimpin DCS' },
         'admin': { password: 'admin123', name: 'Administrator', role: 'Admin' }
     };
     
-    console.log('Checking demo users...'); // Debug
-    
-    // Check demo login FIRST
     if (demoUsers[username] && demoUsers[username].password === password) {
-        console.log('Demo login success!'); // Debug
         currentUser = { username: username, ...demoUsers[username] };
         
         if (remember) {
@@ -567,23 +580,7 @@ async function handleLogin(event) {
         }
         
         showToast('success', 'Login Berhasil', 'Selamat datang, ' + currentUser.name);
-        showMainApp();
-        
-        // Load sample data if empty
-        if (suratData.length === 0) {
-            loadSampleData();
-        }
-        
-        // Try to start Firebase listeners (optional)
-        if (firebaseReady) {
-            try {
-                listenToSurat();
-                listenToDokumen();
-                console.log('Firebase listeners started'); // Debug
-            } catch (e) {
-                console.warn('Firebase listeners failed:', e);
-            }
-        }
+        await showMainApp();
         
         if (loginBtn) {
             loginBtn.innerHTML = originalText;
@@ -592,9 +589,6 @@ async function handleLogin(event) {
         return;
     }
     
-    console.log('Demo login failed, trying Firebase...'); // Debug
-    
-    // If not demo user, try Firebase login
     if (firebaseReady) {
         try {
             var email = username.includes('@') ? username : username + '@banksulselbar.co.id';
@@ -608,11 +602,7 @@ async function handleLogin(event) {
                 }
                 
                 showToast('success', 'Login Berhasil', 'Selamat datang, ' + (currentUser.name || username));
-                showMainApp();
-                
-                // Start realtime listeners
-                listenToSurat();
-                listenToDokumen();
+                await showMainApp();
                 
                 if (loginBtn) {
                     loginBtn.innerHTML = originalText;
@@ -625,8 +615,6 @@ async function handleLogin(event) {
         }
     }
     
-    // Login failed
-    console.log('All login methods failed'); // Debug
     showToast('error', 'Login Gagal', 'Username atau password salah');
     
     if (loginBtn) {
@@ -636,37 +624,31 @@ async function handleLogin(event) {
 }
 
 async function handleLogout() {
-    // Cleanup resources
     cleanupResources();
     
-    // Firebase logout
     if (firebaseReady) {
         await firebaseLogout();
     }
     
-    // Clear session
     localStorage.removeItem('corsecSession');
     currentUser = null;
+    suratData = [];
+    dokumenData = [];
     
-    // Show login page
     document.getElementById('loginPage').style.display = 'flex';
-    document.getElementById('appContainer').style.display = 'none'; // Fixed: was 'mainApp'
+    document.getElementById('appContainer').style.display = 'none';
     
     showToast('info', 'Logout', 'Anda telah keluar dari sistem');
 }
 
-function showMainApp() {
-    console.log('showMainApp called'); // Debug
+async function showMainApp() {
+    console.log('showMainApp called');
     
     var loginPage = document.getElementById('loginPage');
-    var mainApp = document.getElementById('appContainer'); // Fixed: was 'mainApp'
-    
-    console.log('loginPage element:', loginPage); // Debug
-    console.log('appContainer element:', mainApp); // Debug
+    var mainApp = document.getElementById('appContainer');
     
     if (!mainApp) {
-        console.error('ERROR: appContainer element not found!');
-        alert('Error: appContainer tidak ditemukan. Pastikan HTML sudah benar.');
+        console.error('appContainer not found!');
         return;
     }
     
@@ -676,33 +658,46 @@ function showMainApp() {
     
     mainApp.style.display = 'flex';
     
-    // Update user info - Fixed IDs
-    var userName = document.getElementById('userDisplayName'); // Fixed: was 'userName'
+    var userName = document.getElementById('userDisplayName');
     var userRole = document.getElementById('userRole');
     if (userName) userName.textContent = currentUser.name || currentUser.username || 'User';
     if (userRole) userRole.textContent = currentUser.role || 'Staff';
     
-    console.log('Calling navigateTo dashboard...'); // Debug
-    
-    // Initialize
-    try {
-        navigateTo('dashboard');
-        setupDragAndDrop();
-        console.log('Dashboard loaded successfully'); // Debug
-    } catch (e) {
-        console.error('Error loading dashboard:', e);
+    // FIX: Load data dari Firebase SEBELUM navigasi
+    if (firebaseReady) {
+        isLoadingData = true;
+        showToast('info', 'Loading', 'Mengambil data...');
+        
+        try {
+            await loadSuratFromFirebase();
+            await loadDokumenFromFirebase();
+            await loadCountersFromFirebase();
+            
+            // Start realtime listeners sebagai backup
+            listenToSurat();
+            listenToDokumen();
+            
+            console.log('✅ Data loaded:', suratData.length, 'surat,', dokumenData.length, 'dokumen');
+        } catch (e) {
+            console.error('Load data error:', e);
+        }
+        
+        isLoadingData = false;
+    } else if (suratData.length === 0) {
+        loadSampleData();
     }
+    
+    navigateTo('dashboard');
+    setupDragAndDrop();
 }
 
 // ========================================
 // NAVIGATION
 // ========================================
 function navigateTo(pageName) {
-    // Clear pending timeouts
     Object.values(chartTimeouts).forEach(clearTimeout);
     chartTimeouts = {};
     
-    // Clear upload intervals when leaving upload page
     if (pageName !== 'upload-dokumen') {
         uploadIntervals.forEach(clearInterval);
         uploadIntervals = [];
@@ -730,18 +725,15 @@ function navigateTo(pageName) {
         'pengaturan': 'Pengaturan'
     };
     
-    // Hide all pages
     document.querySelectorAll('.page').forEach(function(page) {
         page.style.display = 'none';
     });
     
-    // Show target page
     var targetPage = document.getElementById(pageMap[pageName]);
     if (targetPage) {
         targetPage.style.display = 'block';
     }
     
-    // Update nav active state
     document.querySelectorAll('.nav-item').forEach(function(item) {
         item.classList.remove('active');
         if (item.dataset.page === pageName) {
@@ -749,13 +741,11 @@ function navigateTo(pageName) {
         }
     });
     
-    // Update page title
     var pageTitle = document.getElementById('pageTitle');
     if (pageTitle) {
         pageTitle.textContent = titleMap[pageName] || 'CORSEC LENS';
     }
     
-    // Page-specific init
     switch(pageName) {
         case 'dashboard':
             updateDashboardStats();
@@ -777,7 +767,6 @@ function navigateTo(pageName) {
             break;
     }
     
-    // Close sidebar on mobile
     if (window.innerWidth <= 1024) {
         var sidebar = document.getElementById('sidebar');
         if (sidebar) sidebar.classList.remove('active');
@@ -808,7 +797,6 @@ function animateCounter(elementId, target) {
     var element = document.getElementById(elementId);
     if (!element) return;
     
-    // Clear previous interval
     if (counterIntervals[elementId]) {
         clearInterval(counterIntervals[elementId]);
         delete counterIntervals[elementId];
@@ -816,8 +804,7 @@ function animateCounter(elementId, target) {
     
     var current = 0;
     var increment = Math.ceil(target / 30);
-    var duration = 500;
-    var stepTime = duration / 30;
+    var stepTime = 500 / 30;
     
     counterIntervals[elementId] = setInterval(function() {
         current += increment;
@@ -861,13 +848,11 @@ function initCharts() {
     var canvas = document.getElementById('monthlyChart');
     if (!canvas || typeof Chart === 'undefined') return;
     
-    // Destroy old chart
     if (window.monthlyChart instanceof Chart) {
         window.monthlyChart.destroy();
         window.monthlyChart = null;
     }
     
-    // Replace canvas to reset size
     var parent = canvas.parentNode;
     var newCanvas = document.createElement('canvas');
     newCanvas.id = 'monthlyChart';
@@ -927,7 +912,6 @@ async function generateNomorSurat(jenis, divisi) {
     var monthIndex = now.getMonth();
     var bulanRomawi = getBulanRomawi(monthIndex);
     
-    // Get counter from Firebase or localStorage
     var counterValue = await getNomorCounter(jenis);
     var nextCounter = counterValue + 1;
     
@@ -1031,17 +1015,14 @@ async function handleCreateSurat(event) {
         return;
     }
     
-    // Show loading
     var submitBtn = document.querySelector('#suratForm button[type="submit"]');
     var originalText = submitBtn.innerHTML;
     submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menyimpan...';
     submitBtn.disabled = true;
     
     try {
-        // Generate nomor
         var nomor = await generateNomorSurat(jenis, divisi);
         
-        // Upload files if any
         var fileUrls = [];
         if (uploadedFiles.length > 0) {
             for (var file of uploadedFiles) {
@@ -1074,16 +1055,16 @@ async function handleCreateSurat(event) {
             createdBy: currentUser ? (currentUser.name || currentUser.username) : 'User'
         };
         
-        // Save to Firebase
         var result = await saveSuratToFirebase(newSurat);
         
         if (result.success) {
-            // Increment counter
             await incrementNomorCounter(jenis);
+            
+            // FIX: Tambahkan ke local array juga
+            suratData.unshift({ id: result.id, ...newSurat, createdAt: new Date() });
             
             showToast('success', 'Berhasil', 'Surat ' + nomor + ' berhasil dibuat');
             
-            // Reset form
             document.getElementById('suratForm').reset();
             uploadedFiles = [];
             var fileList = document.getElementById('fileList');
@@ -1092,7 +1073,6 @@ async function handleCreateSurat(event) {
             initializeDateInputs();
             updateNomorPreview();
             
-            // Navigate to list
             navigateTo('daftar-surat');
         } else {
             showToast('error', 'Error', 'Gagal menyimpan surat: ' + (result.error || 'Unknown error'));
@@ -1202,11 +1182,7 @@ async function confirmDeleteSurat(suratId) {
         var result = await deleteSuratFromFirebase(suratId);
         
         if (result.success || !firebaseReady) {
-            // Fallback: remove from local array
-            if (!firebaseReady) {
-                suratData = suratData.filter(function(s) { return s.id !== suratId; });
-                localStorage.setItem('corsecSuratData', JSON.stringify(suratData));
-            }
+            suratData = suratData.filter(function(s) { return s.id !== suratId; });
             
             showToast('success', 'Berhasil', 'Surat berhasil dihapus');
             renderSuratTable();
@@ -1325,17 +1301,9 @@ function setupDragAndDrop() {
     dragDropInitialized = true;
 }
 
-// Handle file select dari input (dipanggil dari HTML onclick)
 function handleFileSelect(event) {
     if (event && event.target && event.target.files) {
         handleFileDrop(event.target.files);
-    }
-}
-
-// Handle file select untuk upload dokumen
-function handleUploadFileSelect(event) {
-    if (event && event.target && event.target.files) {
-        handleUploadFiles(event.target.files);
     }
 }
 
@@ -1344,7 +1312,6 @@ function handleFileDrop(files) {
     if (!fileList) return;
     
     Array.from(files).forEach(function(file) {
-        // Check if file already added (prevent duplicates)
         var alreadyAdded = uploadedFiles.some(function(f) { return f.name === file.name && f.size === file.size; });
         if (alreadyAdded) {
             showToast('warning', 'Peringatan', 'File ' + file.name + ' sudah ditambahkan');
@@ -1372,12 +1339,26 @@ function removeFile(fileName, button) {
     if (button) button.closest('.file-item').remove();
 }
 
-function handleUploadFile(event) { handleUploadFiles(event.target.files); }
-
-// Track files being uploaded to prevent duplicates
-var uploadingFiles = {};
+// FIX: Mencegah double upload
+function handleUploadFile(event) {
+    if (isUploading) {
+        console.log('Upload sedang berjalan, skip...');
+        event.target.value = '';
+        return;
+    }
+    handleUploadFiles(event.target.files);
+    event.target.value = '';
+}
 
 async function handleUploadFiles(files) {
+    // FIX: Cek apakah sedang upload
+    if (isUploading) {
+        console.log('Already uploading, skipped');
+        return;
+    }
+    
+    isUploading = true;
+    
     var kategoriEl = document.getElementById('uploadKategori');
     var keteranganEl = document.getElementById('uploadKeterangan');
     var uploadQueue = document.getElementById('uploadQueue');
@@ -1385,20 +1366,14 @@ async function handleUploadFiles(files) {
     var kategori = kategoriEl ? kategoriEl.value : 'Umum';
     var keterangan = keteranganEl ? keteranganEl.value : '';
     
-    if (!uploadQueue) return;
+    if (!uploadQueue) {
+        isUploading = false;
+        return;
+    }
     
     for (var file of Array.from(files)) {
-        // Prevent double upload
-        var fileKey = file.name + '_' + file.size;
-        if (uploadingFiles[fileKey]) {
-            console.log('File already uploading:', file.name);
-            continue;
-        }
-        uploadingFiles[fileKey] = true;
-        
         if (file.size > 25 * 1024 * 1024) {
             showToast('error', 'Error', 'File ' + file.name + ' terlalu besar (max 25MB)');
-            delete uploadingFiles[fileKey];
             continue;
         }
         
@@ -1412,18 +1387,15 @@ async function handleUploadFiles(files) {
         var progressBar = uploadItem.querySelector('.upload-progress-bar');
         
         try {
-            // Generate path
             var timestamp = Date.now();
             var path = 'dokumen/' + new Date().getFullYear() + '/' + (new Date().getMonth() + 1) + '/' + timestamp + '_' + file.name;
             
-            // Upload to Firebase Storage
             var result = await uploadFileWithProgress(file, path, function(progress) {
                 if (progressBar) progressBar.style.width = progress + '%';
             });
             
             if (result.success) {
-                // Save metadata to Firestore
-                await saveDokumenToFirebase({
+                var saveResult = await saveDokumenToFirebase({
                     name: file.name,
                     size: file.size,
                     type: file.type,
@@ -1433,6 +1405,22 @@ async function handleUploadFiles(files) {
                     keterangan: keterangan,
                     uploadedBy: currentUser ? (currentUser.name || currentUser.username) : 'User'
                 });
+                
+                if (saveResult.success) {
+                    // FIX: Tambahkan ke local array
+                    dokumenData.unshift({
+                        id: saveResult.id,
+                        name: file.name,
+                        size: file.size,
+                        type: file.type,
+                        url: result.url,
+                        path: result.path,
+                        kategori: kategori,
+                        keterangan: keterangan,
+                        uploadedBy: currentUser ? currentUser.name : 'User',
+                        createdAt: new Date()
+                    });
+                }
                 
                 uploadItem.classList.add('complete');
                 showToast('success', 'Upload Berhasil', file.name);
@@ -1444,11 +1432,14 @@ async function handleUploadFiles(files) {
             console.error('Upload error:', error);
             uploadItem.classList.add('error');
             showToast('error', 'Upload Error', error.message || 'Gagal upload file');
-        } finally {
-            // Remove from uploading tracker
-            delete uploadingFiles[fileKey];
         }
     }
+    
+    // Update UI
+    updateDashboardStats();
+    renderDokumenGrid();
+    
+    isUploading = false;
 }
 
 // ========================================
@@ -1504,10 +1495,7 @@ async function confirmDeleteDokumen(dokumenId, filePath) {
         var result = await deleteDokumenFromFirebase(dokumenId, filePath);
         
         if (result.success || !firebaseReady) {
-            if (!firebaseReady) {
-                dokumenData = dokumenData.filter(function(d) { return d.id !== dokumenId; });
-                localStorage.setItem('corsecDokumenData', JSON.stringify(dokumenData));
-            }
+            dokumenData = dokumenData.filter(function(d) { return d.id !== dokumenId; });
             
             showToast('success', 'Berhasil', 'Dokumen berhasil dihapus');
             renderDokumenGrid();
@@ -1526,7 +1514,6 @@ function renderFolderTree() {
     var content = document.getElementById('folderContent');
     if (!container) return;
     
-    // Group by category
     var folders = {};
     dokumenData.forEach(function(doc) {
         var cat = doc.kategori || 'Lainnya';
@@ -1534,7 +1521,6 @@ function renderFolderTree() {
         folders[cat].push(doc);
     });
     
-    // Also group surat by type
     suratData.forEach(function(surat) {
         var cat = 'Surat: ' + surat.jenis;
         if (!folders[cat]) folders[cat] = [];
@@ -1563,7 +1549,6 @@ function openFolder(folderName, evt) {
     var content = document.getElementById('folderContent');
     if (!content) return;
     
-    // Get items in folder
     var items = [];
     
     dokumenData.forEach(function(doc) {
@@ -1646,10 +1631,7 @@ function showToast(type, title, message) {
     
     container.appendChild(toast);
     
-    setTimeout(function() {
-        toast.classList.add('show');
-    }, 10);
-    
+    setTimeout(function() { toast.classList.add('show'); }, 10);
     setTimeout(function() {
         toast.classList.remove('show');
         setTimeout(function() { toast.remove(); }, 300);
@@ -1693,31 +1675,10 @@ function loadSampleData() {
             status: 'Selesai',
             files: [],
             createdBy: 'Safirah Wardinah'
-        },
-        {
-            id: String(now + 1),
-            nomor: 'SK/001/DIR/XII/2025',
-            jenis: 'Surat Keputusan',
-            divisi: 'Direksi',
-            sifat: 'Segera',
-            tanggal: '2025-12-17',
-            kepada: 'Seluruh Pegawai',
-            perihal: 'Pemberian Penghargaan Masa Kerja',
-            lampiran: '1 Lampiran',
-            tembusan: 'DHC',
-            status: 'Selesai',
-            files: [],
-            createdBy: 'Safirah Wardinah'
         }
     ];
     
-    nomorCounters = {
-        'Surat Biasa': 1,
-        'Surat Keputusan': 1
-    };
-    
-    localStorage.setItem('corsecSuratData', JSON.stringify(suratData));
-    localStorage.setItem('corsecNomorCounters', JSON.stringify(nomorCounters));
+    nomorCounters = { 'Surat Biasa': 1 };
 }
 
 // ========================================
@@ -1739,7 +1700,6 @@ function changePassword() {
     showToast('info', 'Info', 'Fitur ubah password - hubungi admin');
 }
 
-// Close modal when clicking outside
 window.onclick = function(event) {
     var modal = document.getElementById('modal');
     if (event.target === modal) {
@@ -1747,4 +1707,4 @@ window.onclick = function(event) {
     }
 };
 
-console.log('CORSEC LENS v2.0.0 - Firebase Integration - Loaded');
+console.log('CORSEC LENS v2.0.1 - Firebase Integration Fixed');
