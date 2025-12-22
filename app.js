@@ -1313,7 +1313,7 @@ function renderDokumenGrid() {
         html += '</div>';
         html += '<div class="dokumen-actions">';
         if (doc.url) {
-            html += '<a href="' + doc.url + '" target="_blank" class="btn-icon" title="Lihat"><i class="fas fa-eye"></i></a>';
+            html += '<button class="btn-icon" onclick="previewDokumen(\'' + doc.id + '\')" title="Lihat"><i class="fas fa-eye"></i></button>';
             html += '<a href="' + doc.url + '" download="' + doc.name + '" class="btn-icon" title="Download"><i class="fas fa-download"></i></a>';
         }
         html += '<button class="btn-icon danger" onclick="confirmDeleteDokumen(\'' + doc.id + '\', \'' + (doc.path || '') + '\')" title="Hapus"><i class="fas fa-trash"></i></button>';
@@ -1321,6 +1321,67 @@ function renderDokumenGrid() {
     });
     
     grid.innerHTML = html;
+}
+
+// Preview dokumen dalam modal
+function previewDokumen(dokumenId) {
+    var doc = dokumenData.find(function(d) { return d.id === dokumenId; });
+    if (!doc || !doc.url) {
+        showToast('error', 'Error', 'Dokumen tidak ditemukan');
+        return;
+    }
+    
+    var modalTitle = document.getElementById('modalTitle');
+    var modalBody = document.getElementById('modalBody');
+    var modal = document.getElementById('detailModal');
+    
+    if (modalTitle) modalTitle.textContent = doc.name;
+    
+    var previewHtml = '';
+    var fileType = doc.type || '';
+    var fileName = doc.name || '';
+    
+    // Check file type untuk preview
+    if (fileType.indexOf('pdf') !== -1 || fileName.toLowerCase().endsWith('.pdf')) {
+        // PDF - gunakan iframe
+        previewHtml = '<div class="preview-container">' +
+            '<iframe src="' + doc.url + '" class="preview-iframe"></iframe>' +
+            '</div>';
+    } else if (fileType.indexOf('image') !== -1 || /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fileName)) {
+        // Image - tampilkan langsung
+        previewHtml = '<div class="preview-container preview-image">' +
+            '<img src="' + doc.url + '" alt="' + doc.name + '">' +
+            '</div>';
+    } else if (fileType.indexOf('word') !== -1 || /\.(doc|docx)$/i.test(fileName)) {
+        // Word - gunakan Google Docs Viewer
+        previewHtml = '<div class="preview-container">' +
+            '<iframe src="https://docs.google.com/gview?url=' + encodeURIComponent(doc.url) + '&embedded=true" class="preview-iframe"></iframe>' +
+            '</div>';
+    } else if (fileType.indexOf('excel') !== -1 || fileType.indexOf('spreadsheet') !== -1 || /\.(xls|xlsx)$/i.test(fileName)) {
+        // Excel - gunakan Google Docs Viewer
+        previewHtml = '<div class="preview-container">' +
+            '<iframe src="https://docs.google.com/gview?url=' + encodeURIComponent(doc.url) + '&embedded=true" class="preview-iframe"></iframe>' +
+            '</div>';
+    } else {
+        // File lain - tampilkan info saja
+        previewHtml = '<div class="preview-unsupported">' +
+            '<i class="fas ' + getFileIcon(fileType) + '"></i>' +
+            '<h3>' + doc.name + '</h3>' +
+            '<p>Preview tidak tersedia untuk tipe file ini</p>' +
+            '<a href="' + doc.url + '" target="_blank" class="btn-primary"><i class="fas fa-external-link-alt"></i> Buka di Tab Baru</a>' +
+            '</div>';
+    }
+    
+    // Tambah info dokumen
+    previewHtml += '<div class="preview-info">' +
+        '<p><strong>Nama:</strong> ' + doc.name + '</p>' +
+        '<p><strong>Ukuran:</strong> ' + formatFileSize(doc.size) + '</p>' +
+        '<p><strong>Kategori:</strong> ' + (doc.kategori || 'Umum') + '</p>' +
+        '<p><strong>Keterangan:</strong> ' + (doc.keterangan || '-') + '</p>' +
+        '</div>';
+    
+    if (modalBody) modalBody.innerHTML = previewHtml;
+    if (modal) modal.style.display = 'flex';
 }
 
 function filterDokumenList() {
