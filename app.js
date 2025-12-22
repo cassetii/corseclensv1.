@@ -196,9 +196,20 @@ function listenToSurat() {
 }
 
 // ========================================
-// FIREBASE - COUNTER OPERATIONS
+// FIREBASE - COUNTER OPERATIONS (dengan caching)
 // ========================================
+var counterCache = {};
+var counterCacheTime = {};
+var CACHE_DURATION = 60000; // 1 menit cache
+
 async function getNomorCounter(jenisSurat) {
+    // Return from cache if still valid
+    if (counterCache[jenisSurat] !== undefined && counterCacheTime[jenisSurat]) {
+        if (Date.now() - counterCacheTime[jenisSurat] < CACHE_DURATION) {
+            return counterCache[jenisSurat];
+        }
+    }
+    
     if (!firebaseReady) return nomorCounters[jenisSurat] || 0;
     
     try {
@@ -206,18 +217,28 @@ async function getNomorCounter(jenisSurat) {
         const doc = await counterRef.get();
         
         if (doc.exists && doc.data()[jenisSurat]) {
+            counterCache[jenisSurat] = doc.data()[jenisSurat];
+            counterCacheTime[jenisSurat] = Date.now();
             return doc.data()[jenisSurat];
         }
         return 0;
     } catch (error) {
         console.error('Get counter error:', error);
+        // Return cached value on error
+        if (counterCache[jenisSurat] !== undefined) {
+            return counterCache[jenisSurat];
+        }
         return nomorCounters[jenisSurat] || 0;
     }
 }
 
 async function incrementNomorCounter(jenisSurat) {
+    // Update local cache immediately
+    counterCache[jenisSurat] = (counterCache[jenisSurat] || 0) + 1;
+    counterCacheTime[jenisSurat] = Date.now();
+    nomorCounters[jenisSurat] = counterCache[jenisSurat];
+    
     if (!firebaseReady) {
-        nomorCounters[jenisSurat] = (nomorCounters[jenisSurat] || 0) + 1;
         return { success: true };
     }
     
@@ -238,7 +259,8 @@ async function incrementNomorCounter(jenisSurat) {
         return { success: true };
     } catch (error) {
         console.error('Increment counter error:', error);
-        return { success: false, error: error.message };
+        // Still return success because local counter was updated
+        return { success: true, warning: 'Firebase sync failed, using local counter' };
     }
 }
 
@@ -1303,11 +1325,32 @@ function setupDragAndDrop() {
     dragDropInitialized = true;
 }
 
+// Handle file select dari input (dipanggil dari HTML onclick)
+function handleFileSelect(event) {
+    if (event && event.target && event.target.files) {
+        handleFileDrop(event.target.files);
+    }
+}
+
+// Handle file select untuk upload dokumen
+function handleUploadFileSelect(event) {
+    if (event && event.target && event.target.files) {
+        handleUploadFiles(event.target.files);
+    }
+}
+
 function handleFileDrop(files) {
     var fileList = document.getElementById('fileList');
     if (!fileList) return;
     
     Array.from(files).forEach(function(file) {
+        // Check if file already added (prevent duplicates)
+        var alreadyAdded = uploadedFiles.some(function(f) { return f.name === file.name && f.size === file.size; });
+        if (alreadyAdded) {
+            showToast('warning', 'Peringatan', 'File ' + file.name + ' sudah ditambahkan');
+            return;
+        }
+        
         if (file.size > 10 * 1024 * 1024) {
             showToast('error', 'Error', 'File ' + file.name + ' terlalu besar (max 10MB)');
             return;
@@ -1331,6 +1374,9 @@ function removeFile(fileName, button) {
 
 function handleUploadFile(event) { handleUploadFiles(event.target.files); }
 
+// Track files being uploaded to prevent duplicates
+var uploadingFiles = {};
+
 async function handleUploadFiles(files) {
     var kategoriEl = document.getElementById('uploadKategori');
     var keteranganEl = document.getElementById('uploadKeterangan');
@@ -1342,8 +1388,17 @@ async function handleUploadFiles(files) {
     if (!uploadQueue) return;
     
     for (var file of Array.from(files)) {
+        // Prevent double upload
+        var fileKey = file.name + '_' + file.size;
+        if (uploadingFiles[fileKey]) {
+            console.log('File already uploading:', file.name);
+            continue;
+        }
+        uploadingFiles[fileKey] = true;
+        
         if (file.size > 25 * 1024 * 1024) {
             showToast('error', 'Error', 'File ' + file.name + ' terlalu besar (max 25MB)');
+            delete uploadingFiles[fileKey];
             continue;
         }
         
@@ -1383,12 +1438,15 @@ async function handleUploadFiles(files) {
                 showToast('success', 'Upload Berhasil', file.name);
             } else {
                 uploadItem.classList.add('error');
-                showToast('error', 'Upload Gagal', file.name);
+                showToast('error', 'Upload Gagal', result.error || file.name);
             }
         } catch (error) {
             console.error('Upload error:', error);
             uploadItem.classList.add('error');
-            showToast('error', 'Upload Error', error.message);
+            showToast('error', 'Upload Error', error.message || 'Gagal upload file');
+        } finally {
+            // Remove from uploading tracker
+            delete uploadingFiles[fileKey];
         }
     }
 }
