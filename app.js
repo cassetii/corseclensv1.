@@ -495,9 +495,23 @@ function setupEventListeners() {
 async function handleLogin(event) {
     event.preventDefault();
     
-    var username = document.getElementById('username').value.trim().toLowerCase();
-    var password = document.getElementById('password').value;
-    var remember = document.getElementById('remember') ? document.getElementById('remember').checked : false;
+    console.log('Login attempt...'); // Debug
+    
+    var usernameEl = document.getElementById('username');
+    var passwordEl = document.getElementById('password');
+    var rememberEl = document.getElementById('rememberMe'); // Fixed: was 'remember'
+    
+    if (!usernameEl || !passwordEl) {
+        console.error('Form elements not found!');
+        showToast('error', 'Error', 'Form tidak ditemukan');
+        return;
+    }
+    
+    var username = usernameEl.value.trim().toLowerCase();
+    var password = passwordEl.value;
+    var remember = rememberEl ? rememberEl.checked : false;
+    
+    console.log('Username:', username); // Debug
     
     if (!username || !password) {
         showToast('error', 'Error', 'Username dan password harus diisi');
@@ -519,8 +533,11 @@ async function handleLogin(event) {
         'admin': { password: 'admin123', name: 'Administrator', role: 'Admin' }
     };
     
+    console.log('Checking demo users...'); // Debug
+    
     // Check demo login FIRST
     if (demoUsers[username] && demoUsers[username].password === password) {
+        console.log('Demo login success!'); // Debug
         currentUser = { username: username, ...demoUsers[username] };
         
         if (remember) {
@@ -540,6 +557,7 @@ async function handleLogin(event) {
             try {
                 listenToSurat();
                 listenToDokumen();
+                console.log('Firebase listeners started'); // Debug
             } catch (e) {
                 console.warn('Firebase listeners failed:', e);
             }
@@ -551,6 +569,8 @@ async function handleLogin(event) {
         }
         return;
     }
+    
+    console.log('Demo login failed, trying Firebase...'); // Debug
     
     // If not demo user, try Firebase login
     if (firebaseReady) {
@@ -584,6 +604,7 @@ async function handleLogin(event) {
     }
     
     // Login failed
+    console.log('All login methods failed'); // Debug
     showToast('error', 'Login Gagal', 'Username atau password salah');
     
     if (loginBtn) {
